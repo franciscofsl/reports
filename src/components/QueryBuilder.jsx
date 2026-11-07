@@ -229,8 +229,11 @@ export default function QueryBuilder({ builder, onChange, params = [] }) {
               const rangeParams = params.filter((p) => p.type === 'daterange').map((p) => p.name);
               return (
                 <div key={f.id} className="qb-filter">
-                  <select className="ui-input" aria-label="Columna" value={`${f.alias}.${f.col}`} onChange={(e) => { const [alias, col] = e.target.value.split('.'); updFilter(f.id, { alias, col }); }}>
+                  <select className="ui-input" aria-label="Columna" value={`${f.alias}.${f.col}`} onChange={(e) => { const [alias, col] = e.target.value.split('.'); updFilter(f.id, { alias, col, fn: '' }); }}>
                     {allCols.map((c) => <option key={c.label} value={c.label}>{c.label}</option>)}
+                  </select>
+                  <select className="ui-input qb-fn" aria-label="Función del filtro" value={f.fn || ''} onChange={(e) => updFilter(f.id, { fn: e.target.value })}>
+                    {FNS.filter((x) => !x.types || x.types.includes(columnType(tableOf(f.alias)?.table, f.col))).map((x) => <option key={x.value} value={x.value}>{x.value ? x.label : 'Valor tal cual'}</option>)}
                   </select>
                   <select className="ui-input qb-op" aria-label="Operador" value={f.op} onChange={(e) => updFilter(f.id, { op: e.target.value })}>
                     {OPS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}

@@ -171,3 +171,26 @@ test('exportar e importar un informe', async ({ page }) => {
   await expect(page.locator('.report-card')).toHaveCount(4);
   await expect(page.locator('[role=status]')).toContainText('Importado');
 });
+
+test('pasar de SQL al editor visual representa la consulta cargada', async ({ page }) => {
+  await openReport(page, 'Ventas 2025', 'Orígenes de datos');
+  await page.locator('.ds-item', { hasText: 'Detalle de pedidos' }).click();
+  await page.getByRole('tab', { name: /Editor visual/ }).click();
+  await expect(page.locator('.ds-mode-msg')).toContainText('Consulta cargada en el editor visual');
+  await expect(page.locator('.qb-box')).toHaveCount(3);
+  await expect(page.locator('.qb-join')).toHaveCount(2);
+  await expect(page.locator('.qb-section').first().locator('tbody tr')).toHaveCount(9);
+  await expect(page.locator('.qb-filter').getByLabel('Función del filtro')).toHaveValue('YEAR');
+  await expect(page.locator('.qb-filter').getByLabel('Parámetro')).toHaveValue('anio');
+  await page.getByRole('button', { name: 'Ejecutar' }).first().click();
+  await expect(page.locator('.ui-msg-ok', { hasText: 'filas en' })).toContainText('466 filas');
+});
+
+test('una consulta no representable se queda en SQL y explica el motivo', async ({ page }) => {
+  await openReport(page, 'Equipo comercial', 'Orígenes de datos');
+  await page.getByRole('tab', { name: /Editor visual/ }).click();
+  await expect(page.locator('.ds-mode-msg')).toContainText('operaciones aritméticas');
+  await expect(page.getByRole('tab', { name: /SQL/ })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('button', { name: 'Seguir en SQL' }).click();
+  await expect(page.locator('.ds-mode-msg')).toHaveCount(0);
+});

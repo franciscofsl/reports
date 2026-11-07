@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
 import {
-  DATE_PRESETS, FIELD_TYPES, FORMATS, PARAM_TYPES, RELATIVE_DATES, exposedParamNames, getSchema,
+  DATE_PRESETS, FIELD_TYPES, FORMATS, PARAM_TYPES, RELATIVE_DATES, exposedParamNames, getSchema, resolveParams, runQuery,
   paramOptions, runDataSource, sqlDependencies, sqlParams, validateExpr,
 } from '../lib/sqlEngine.js';
 import { emptyBuilder, toSql } from '../lib/queryBuilder.js';
+import { sqlToBuilder } from '../lib/sqlToBuilder.js';
 import { QUERY_SNIPPETS } from '../lib/templates.js';
 import Icon from './Icon.jsx';
 import QueryBuilder from './QueryBuilder.jsx';
@@ -47,6 +48,7 @@ export default function DataSourcesEditor({ dataSources, params, onChange, usage
   const [selId, setSelId] = useState(dataSources[0]?.id || null);
   const [result, setResult] = useState(null);
   const [showSql, setShowSql] = useState(false);
+  const [modeMsg, setModeMsg] = useState(null);
   const sqlRef = useRef(null);
   const schema = useMemo(() => getSchema(), []);
   const sel = dataSources.find((d) => d.id === selId) || null;
@@ -111,14 +113,43 @@ export default function DataSourcesEditor({ dataSources, params, onChange, usage
   const setBuilder = (builder) => {
     updateSel({ builder, sql: toSql(builder).sql });
   };
+  // Comprueba que la consulta regenerada devuelve lo mismo que la original (null si no se puede ejecutar).
+  const sameResult = (a, b) => {
+    try {
+      const p = resolveParams(params);
+      const ra = runQuery(a, p).rows;
+      const rb = runQuery(b, p).rows;
+      const key = (rows) => JSON.stringify(rows.map((r) => Object.values(r)));
+      return key(ra) === key(rb);
+    } catch {
+      return null;
+    }
+  };
   const switchMode = (mode) => {
     if (mode === sel.mode) return;
-    if (mode === 'visual') {
-      const gen = sel.builder ? toSql(sel.builder).sql : '';
-      if (sel.sql && sel.sql.trim() !== gen.trim() && !confirm('El editor visual no puede leer SQL escrito a mano. Se sustituirá la consulta por la del diseño visual. ¿Continuar?')) return;
+    setModeMsg(null);
+    if (mode === 'sql') return updateSel({ mode });
+    const sql = (sel.sql || '').trim();
+    if (sel.builder && toSql(sel.builder).sql.trim() === sql) return updateSel({ mode });
+    if (!sql) {
       const builder = sel.builder || emptyBuilder();
-      updateSel({ mode, builder, sql: toSql(builder).sql });
-    } else updateSel({ mode });
+      return updateSel({ mode, builder, sql: toSql(builder).sql });
+    }
+    try {
+      const builder = sqlToBuilder(sel.sql, sel.builder);
+      const generated = toSql(builder).sql;
+      if (sameResult(sel.sql, generated) === false) throw new Error('la consulta equivalente que genera el editor visual no devuelve los mismos datos');
+      updateSel({ mode, builder, sql: generated });
+      setModeMsg({ ok: true, text: `Consulta cargada en el editor visual (${builder.tables.length} tabla(s), ${builder.columns.length || 'todas las'} columna(s), ${builder.filters.length} filtro(s)). El SQL se ha reescrito en formato estándar con el mismo resultado.` });
+    } catch (e) {
+      setModeMsg({ ok: false, text: `Esta consulta no se puede representar en el editor visual porque ${e.message}.` });
+    }
+  };
+  const startVisualFromScratch = (useLast) => {
+    const builder = useLast && sel.builder ? sel.builder : emptyBuilder();
+    if (!confirm('Se sustituirá la consulta SQL actual por la del editor visual. ¿Continuar?')) return;
+    updateSel({ mode: 'visual', builder, sql: toSql(builder).sql });
+    setModeMsg(null);
   };
 
   const usedParams = sel ? sqlParams(sel.sql) : [];
@@ -179,7 +210,7 @@ export default function DataSourcesEditor({ dataSources, params, onChange, usage
           <ul className="ds-items" role="listbox" aria-label="Orígenes de datos">
             {dataSources.map((d) => (
               <li key={d.id}>
-                <button type="button" role="option" aria-selected={d.id === selId} className={`ds-item ${d.id === selId ? 'is-sel' : ''}`} onClick={() => { setSelId(d.id); setResult(null); }}>
+                <button type="button" role="option" aria-selected={d.id === selId} className={`ds-item ${d.id === selId ? 'is-sel' : ''}`} onClick={() => { setSelId(d.id); setResult(null); setModeMsg(null); }}>
                   <Icon name={d.mode === 'visual' ? 'layout' : 'db'} size={16} />
                   <span className="ds-item-txt"><b>{d.name}</b><small>{d.id} · {d.fields?.length || 0} campos{usage[d.id] ? ` · ${usage[d.id]} uso(s)` : ''}{sqlDependencies(d.sql).length ? ' · derivado' : ''}</small></span>
                 </button>
@@ -241,6 +272,18 @@ export default function DataSourcesEditor({ dataSources, params, onChange, usage
               {sel.mode === 'visual' && <button type="button" className="ui-link" onClick={() => setShowSql(!showSql)}>{showSql ? 'Ocultar SQL generado' : 'Ver SQL generado'}</button>}
             </div>
 
+            {modeMsg && (
+              <div className={`ui-msg ${modeMsg.ok ? 'ui-msg-ok' : 'ui-msg-warn'} ds-mode-msg`} role="status">
+                <span>{modeMsg.text}</span>
+                {!modeMsg.ok && (
+                  <span className="ui-actions" style={{ margin: '6px 0 0' }}>
+                    <button type="button" className="ui-btn ui-btn-subtle" onClick={() => setModeMsg(null)}>Seguir en SQL</button>
+                    {sel.builder && <button type="button" className="ui-btn ui-btn-subtle" onClick={() => startVisualFromScratch(true)}>Volver al último diseño visual</button>}
+                    <button type="button" className="ui-btn ui-btn-subtle" onClick={() => startVisualFromScratch(false)}>Empezar de cero en el editor visual</button>
+                  </span>
+                )}
+              </div>
+            )}
             {sel.mode === 'visual' ? (
               <>
                 <QueryBuilder builder={sel.builder || emptyBuilder()} onChange={setBuilder} params={params} />

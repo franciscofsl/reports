@@ -98,6 +98,7 @@ function selectExpr(c) {
 }
 function literal(v, type) {
   if (type === 'number' && v !== '' && !isNaN(Number(v))) return String(Number(v));
+  if (type === 'boolean' && /^(true|false|sí|si|no)$/i.test(String(v).trim())) return /^(true|sí|si)$/i.test(String(v).trim()) ? 'TRUE' : 'FALSE';
   return `'${String(v ?? '').replace(/'/g, "''")}'`;
 }
 
@@ -153,8 +154,8 @@ export function toSql(b) {
   const incomplete = b.filters.filter((f) => !complete(f)).length;
   if (incomplete) warnings.push(`${incomplete} filtro(s) sin completar: se ignoran hasta que indiques un valor o parámetro.`);
   const where = b.filters.filter(complete).map((f) => {
-    const type = columnType(byAlias[f.alias]?.table, f.col);
-    const e = `${f.alias}.${ident(f.col)}`;
+    const type = f.fn === 'YEAR' || f.fn === 'MONTH' || f.fn === 'ROUND' ? 'number' : f.fn ? 'string' : columnType(byAlias[f.alias]?.table, f.col);
+    const e = colExpr({ alias: f.alias, col: f.col, fn: f.fn || '' });
     const val = (v) => (f.kind === 'param' ? `:${f.param || 'param'}` : literal(v, type));
     let cond;
     if (f.op === 'IS NULL' || f.op === 'IS NOT NULL') cond = `${e} ${f.op}`;

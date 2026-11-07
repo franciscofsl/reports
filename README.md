@@ -12,6 +12,7 @@ Prototipo en React de un **asistente para crear informes HTML** con orígenes de
 
 ### Orígenes de datos
 - **Editor visual de consultas**: arrastra tablas al lienzo; las relaciones `<tabla>_id → <tabla>.id` se unen solas, o une dos columnas con un clic en sus conectores (unión interna/izquierda). Marca columnas, elige función (año, mes, año-mes…), agregación, alias y orden; añade filtros por valor o por parámetro (opcionales con «ignorar si vacío»), DISTINCT y límite. Genera el SQL al momento.
+- **De SQL al editor visual**: al cambiar de pestaña, la consulta SQL se interpreta y se dibuja en el lienzo (tablas, uniones, columnas, funciones, agregaciones, filtros con valores o parámetros, orden y límite). Se comprueba que la consulta regenerada devuelve los mismos datos; si usa algo que el editor visual no representa (expresiones aritméticas, `CASE`, `OR`, `HAVING`, subconsultas, `RIGHT JOIN`, orígenes derivados…) se queda en SQL y explica el motivo.
 - **Editor SQL** (CodeMirror) con resaltado y autocompletado de tablas, columnas y orígenes; solo `SELECT` (validado con parser).
 - **Orígenes derivados**: `SELECT … FROM origen.<id>` reutiliza el resultado de otro origen (orden de ejecución y ciclos resueltos automáticamente).
 - **Campos calculados** sin tocar el SQL (`importe / pedidos`, `CASE WHEN …`).

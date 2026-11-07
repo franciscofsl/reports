@@ -345,7 +345,7 @@ textarea.ui-input { resize: vertical; line-height: 1.5; }
 .qb-filters { display: flex; flex-direction: column; gap: 6px; }
 .qb-filter { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 6px; border: 1px solid var(--rpt-stroke-2); border-radius: var(--rpt-radius-s); }
 .qb-filter .ui-input { width: auto; flex: 1 1 120px; }
-.qb-filter .qb-op, .qb-filter .qb-kind { flex: 0 1 110px; }
+.qb-filter .qb-op, .qb-filter .qb-kind, .qb-filter .qb-fn { flex: 0 1 110px; }
 .qb-opt { margin: 0; white-space: nowrap; }
 .qb-options { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
 .qb-options .ui-check { margin: 0; }
@@ -416,3 +416,4 @@ textarea.ui-input { resize: vertical; line-height: 1.5; }
   .list-tools .ui-input { flex: 1 1 45%; }
   .viewer-bar .ui-actions { width: 100%; }
 }
+.ds-mode-msg { display: flex; flex-direction: column; }

@@ -1,7 +1,7 @@
 // Persistencia del prototipo en localStorage. En producción: API REST + BD.
 import { uid } from './catalog.js';
 import { generateHtml } from './htmlGenerator.js';
-import { salesTemplate } from './templates.js';
+import { inventoryTemplate, salesTeamTemplate, salesTemplate } from './templates.js';
 
 const K_REPORTS = 'rpt.reports.v1';
 const K_VERSIONS = (id) => `rpt.versions.v1.${id}`;
@@ -30,18 +30,23 @@ const emit = () => listeners.forEach((fn) => fn());
 export function listReports() {
   const list = read(K_REPORTS, null);
   if (list) return list;
-  // Primera ejecución: semilla con un informe de ejemplo.
-  const t = salesTemplate();
-  const report = {
-    id: uid('rpt'),
-    name: 'Ventas 2025 (ejemplo)',
-    description: 'Informe de ejemplo creado con el asistente.',
-    mode: 'designer',
-    ...t,
-  };
-  report.html = generateHtml(report);
-  const saved = persist(report, 'Versión inicial', []);
-  return [saved];
+  // Primera ejecución: semilla con informes de ejemplo creados a partir de las plantillas.
+  const seeds = [
+    ['Inventario (ejemplo)', 'Campos calculados, origen derivado y rango de fechas.', inventoryTemplate()],
+    ['Equipo comercial (ejemplo)', 'Ventas frente a objetivo, combinado, dispersión y tabla dinámica.', salesTeamTemplate()],
+    ['Ventas 2025 (ejemplo)', 'Filtros, filtro cruzado, gauge y tabla con formato condicional.', salesTemplate()],
+  ];
+  let all = [];
+  for (const [name, description, t] of seeds) {
+    const report = { id: uid('rpt'), name, description, mode: 'designer', ...t };
+    report.html = generateHtml(report);
+    const saved = persist(report, 'Versión inicial', all);
+    const v = listVersions(saved.id)[0];
+    saved.published = { versionId: v.id, n: v.n, date: v.date };
+    all = [saved, ...all.filter((r) => r.id !== saved.id)];
+    write(K_REPORTS, all);
+  }
+  return all;
 }
 
 export const getReport = (id) => listReports().find((r) => r.id === id) || null;
@@ -51,7 +56,8 @@ function persist(report, note, list) {
   const now = new Date().toISOString();
   const versions = listVersions(report.id);
   const n = (versions[0]?.n || 0) + 1;
-  const saved = { ...report, createdAt: report.createdAt || now, updatedAt: now, version: n };
+  const stored = list.find((r) => r.id === report.id);
+  const saved = { ...report, published: stored ? stored.published ?? null : report.published ?? null, createdAt: report.createdAt || now, updatedAt: now, version: n };
   const snapshot = {
     id: uid('v'),
     n,
@@ -89,19 +95,71 @@ export function deleteReport(id) {
 export function duplicateReport(id) {
   const r = getReport(id);
   if (!r) return null;
-  const { id: _old, version: _v, createdAt: _c, ...rest } = r;
+  const { id: _old, version: _v, createdAt: _c, published: _p, ...rest } = r;
   return createReport({ ...structuredClone(rest), name: `${r.name} (copia)` }, `Duplicado de «${r.name}» v${r.version}`);
 }
 
-/** Restaura una copia: no borra el historial, crea una versión nueva con el contenido antiguo. */
-export function restoreVersion(reportId, versionId) {
+/** Restaura una copia (completa o por partes). No borra el historial: crea una versión nueva. */
+export function restoreVersion(reportId, versionId, parts = ['design', 'data', 'params']) {
   const r = getReport(reportId);
   const v = listVersions(reportId).find((x) => x.id === versionId);
   if (!r || !v) throw new Error('Versión no encontrada');
-  return saveReport(
-    { ...r, mode: v.mode, html: v.html, model: v.model, dataSources: v.dataSources, params: v.params },
-    `Restaurada la versión ${v.n}`,
-  );
+  const next = { ...r };
+  if (parts.includes('design')) Object.assign(next, { mode: v.mode, html: v.html, model: v.model });
+  if (parts.includes('data')) next.dataSources = v.dataSources;
+  if (parts.includes('params')) next.params = v.params;
+  const what = parts.length === 3 ? '' : ` (${parts.map((x) => ({ design: 'diseño', data: 'orígenes', params: 'parámetros' })[x]).join(', ')})`;
+  return saveReport(next, `Restaurada la versión ${v.n}${what}`);
+}
+
+/** Actualiza datos del informe que no generan versión (p. ej. la versión publicada). */
+function patchReport(id, patch) {
+  const list = read(K_REPORTS, []);
+  write(K_REPORTS, list.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  emit();
+  return getReport(id);
+}
+
+/** Publica una versión: es la que ve el lector en el visor compartido. */
+export function publishVersion(reportId, versionId) {
+  const v = listVersions(reportId).find((x) => x.id === versionId);
+  if (!v) throw new Error('Versión no encontrada');
+  return patchReport(reportId, { published: { versionId: v.id, n: v.n, date: new Date().toISOString() } });
+}
+export const unpublish = (reportId) => patchReport(reportId, { published: null });
+
+export function getPublished(reportId) {
+  const r = getReport(reportId);
+  if (!r?.published) return null;
+  const v = listVersions(reportId).find((x) => x.id === r.published.versionId);
+  return v ? { report: r, version: v } : null;
+}
+
+export function setVersionLabel(reportId, versionId, label) {
+  write(K_VERSIONS(reportId), listVersions(reportId).map((v) => (v.id === versionId ? { ...v, label } : v)));
+  emit();
+}
+
+/* ---------- Exportar / importar ---------- */
+export function exportReport(id, withHistory = false) {
+  const r = getReport(id);
+  if (!r) throw new Error('Informe no encontrado');
+  const { id: _id, version: _v, published: _p, ...report } = r;
+  return { format: 'rpt-report', formatVersion: 1, exportedAt: new Date().toISOString(), report, ...(withHistory ? { versions: listVersions(id) } : {}) };
+}
+
+export function importReport(json) {
+  const data = typeof json === 'string' ? JSON.parse(json) : json;
+  if (data?.format !== 'rpt-report' || !data.report) throw new Error('El archivo no es un informe exportado.');
+  const { report } = data;
+  if (!Array.isArray(report.dataSources) || !report.name) throw new Error('El informe importado está incompleto.');
+  const saved = createReport({ ...report, name: report.name, createdAt: undefined }, 'Importado desde archivo');
+  if (Array.isArray(data.versions) && data.versions.length) {
+    const prev = data.versions.map((v) => ({ ...v, id: uid('v'), note: `${v.note || ''} (importada)`.trim() }));
+    write(K_VERSIONS(saved.id), [...listVersions(saved.id), ...prev].slice(0, MAX_VERSIONS));
+  }
+  emit();
+  return saved;
 }
 
 export function resetDemo() {
@@ -110,3 +168,22 @@ export function resetDemo() {
   listReports();
   emit();
 }
+
+/* ---------- Bloques reutilizables (filas guardadas) ---------- */
+const K_BLOCKS = 'rpt.blocks.v1';
+export const listBlocks = () => read(K_BLOCKS, []);
+export function saveBlock(name, row, sources) {
+  const blocks = [{ id: uid('b'), name, row: structuredClone(row), sources, date: new Date().toISOString() }, ...listBlocks()];
+  write(K_BLOCKS, blocks);
+  emit();
+  return blocks;
+}
+export function deleteBlock(id) {
+  write(K_BLOCKS, listBlocks().filter((b) => b.id !== id));
+  emit();
+}
+
+/* ---------- Portapapeles del diseñador (sirve entre informes) ---------- */
+const K_CLIP = 'rpt.clipboard.v1';
+export const readClipboard = () => read(K_CLIP, null);
+export const writeClipboard = (cells) => { try { write(K_CLIP, cells); } catch { /* noop */ } };

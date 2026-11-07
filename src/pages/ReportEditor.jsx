@@ -6,8 +6,8 @@ import HtmlTab from '../components/HtmlTab.jsx';
 import Icon from '../components/Icon.jsx';
 import ReportFrame from '../components/ReportFrame.jsx';
 import { emptyModel, generateHtml, parseModelFromHtml } from '../lib/htmlGenerator.js';
-import { sourceUsage, validateModel } from '../lib/modelOps.js';
-import { getReport, saveReport } from '../lib/store.js';
+import { renameSource, sourceUsage, validateModel } from '../lib/modelOps.js';
+import { getReport, listVersions, publishVersion, saveReport } from '../lib/store.js';
 
 const TABS = [
   { id: 'preview', label: 'Vista previa', icon: 'eye' },
@@ -74,6 +74,11 @@ export default function ReportEditor({ id, tab, go }) {
           {dirty && <input className="ui-input" placeholder="Nota de la versión (opcional)" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Nota de la versión" />}
           <button className="ui-btn" type="button" disabled={!dirty} onClick={() => { if (confirm('¿Descartar los cambios no guardados?')) setDraft(saved); }}>Descartar</button>
           <button className="ui-btn ui-btn-primary" type="button" disabled={!dirty} onClick={save}><Icon name="save" size={16} />Guardar versión</button>
+          <button className="ui-btn" type="button" disabled={dirty || saved.published?.n === saved.version} title={dirty ? 'Guarda antes de publicar' : 'Publica la versión actual en el visor'}
+            onClick={() => { const v = listVersions(id)[0]; setSaved(publishVersion(id, v.id)); flash(`Publicada la versión ${v.n}`); }}>
+            <Icon name="check" size={16} />{saved.published?.n === saved.version ? `Publicada v${saved.version}` : 'Publicar'}
+          </button>
+          <a className="ui-btn ui-btn-subtle" href={`#/view/${id}`} title="Abrir el visor (versión publicada)"><Icon name="external" size={16} /><span className="ui-hide-s">Visor</span></a>
         </div>
       </div>
 
@@ -108,9 +113,10 @@ export default function ReportEditor({ id, tab, go }) {
             )}
           </div>
         ))}
-        {tab === 'data' && <DataSourcesEditor dataSources={draft.dataSources} params={draft.params} usage={sourceUsage(draft.mode === 'designer' ? draft.model : null)} onChange={patch} />}
+        {tab === 'data' && <DataSourcesEditor dataSources={draft.dataSources} params={draft.params} usage={sourceUsage(draft.mode === 'designer' ? draft.model : null)} onChange={patch}
+          onRename={(from, to) => setDraft((d) => ({ ...d, model: renameSource(d.model, from, to) }))} />}
         {tab === 'html' && <HtmlTab report={draft} onChange={patch} />}
-        {tab === 'history' && <HistoryTab report={saved} dirty={dirty} onRestored={(r) => { setSaved(r); setDraft(r); flash(`Restaurada como versión ${r.version}`); }} />}
+        {tab === 'history' && <HistoryTab report={saved} dirty={dirty} onPublished={() => setSaved(getReport(id))} onRestored={(r) => { setSaved(r); setDraft(r); flash(`Restaurada como versión ${r.version}`); }} />}
       </div>
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>

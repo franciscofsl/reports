@@ -34,7 +34,7 @@ for (const [cat, items] of Object.entries(categorias)) {
   }
 }
 
-const empleados = ['Ana López', 'Luis Pérez', 'Marta Ruiz', 'Javier Gil', 'Lucía Martín', 'Pablo Sanz', 'Elena Díaz', 'Carlos Vega'].map((nombre, i) => ({ id: i + 1, nombre, region: regiones[i % regiones.length], objetivo_mensual: int(15, 40) * 1000 }));
+const empleados = ['Ana López', 'Luis Pérez', 'Marta Ruiz', 'Javier Gil', 'Lucía Martín', 'Pablo Sanz', 'Elena Díaz', 'Carlos Vega'].map((nombre, i) => ({ id: i + 1, nombre, region: regiones[i % regiones.length], objetivo_mensual: int(25, 50) * 1000 }));
 
 const estados = ['Entregado', 'Entregado', 'Entregado', 'Enviado', 'Pendiente', 'Cancelado'];
 const pedidos = [];

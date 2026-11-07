@@ -4,14 +4,17 @@ import Designer from '../components/Designer.jsx';
 import ReportFrame from '../components/ReportFrame.jsx';
 import Icon from '../components/Icon.jsx';
 import { readHtmlFile } from '../components/HtmlTab.jsx';
+import { autoLayout } from '../lib/autoLayout.js';
 import { emptyModel, generateHtml, parseModelFromHtml, sourcesUsedInHtml } from '../lib/htmlGenerator.js';
-import { sourceUsage, validateModel } from '../lib/modelOps.js';
+import { renameSource, sourceUsage, validateModel } from '../lib/modelOps.js';
+import { buildReportData } from '../lib/sqlEngine.js';
 import { createReport } from '../lib/store.js';
-import { salesTemplate } from '../lib/templates.js';
+import { TEMPLATES } from '../lib/templates.js';
 
 const START = [
-  { id: 'blank', title: 'En blanco', text: 'Empieza con un lienzo vacío y define tus orígenes de datos.', icon: 'layout' },
-  { id: 'sales', title: 'Plantilla de ventas', text: 'Losetas, gráficos, KPI y tabla ya vinculados a consultas de ejemplo.', icon: 'report' },
+  { id: 'blank', title: 'En blanco', text: 'Lienzo vacío: define tus orígenes y arrastra componentes.', icon: 'layout' },
+  { id: 'auto', title: 'Desde los datos', text: 'Define los orígenes y el asistente propone un diseño automáticamente.', icon: 'wand' },
+  ...TEMPLATES.map((t) => ({ id: `tpl:${t.id}`, title: `Plantilla: ${t.name}`, text: t.description, icon: t.icon })),
   { id: 'manual', title: 'Subir HTML', text: 'Flujo clásico: sube un HTML propio y carga los orígenes de datos.', icon: 'upload' },
 ];
 
@@ -28,10 +31,11 @@ export default function Wizard({ go, initialMode }) {
 
   const chooseStart = (id) => {
     setStart(id);
-    if (id === 'sales') {
-      const t = salesTemplate();
-      setDraft((d) => ({ ...d, ...t, mode: 'designer', name: d.name || 'Cuadro de mando de ventas', model: { ...t.model, title: d.name || t.model.title } }));
-    } else if (id === 'blank') {
+    if (id.startsWith('tpl:')) {
+      const tpl = TEMPLATES.find((t) => `tpl:${t.id}` === id);
+      const t = tpl.build();
+      setDraft((d) => ({ ...d, ...t, mode: 'designer', name: d.name || t.model.title, model: { ...t.model, title: d.name || t.model.title } }));
+    } else if (id === 'blank' || id === 'auto') {
       setDraft((d) => ({ ...d, mode: 'designer', model: emptyModel(d.name), dataSources: [], params: [] }));
     } else {
       setDraft((d) => ({ ...d, mode: 'manual', dataSources: [], params: [] }));
@@ -39,10 +43,13 @@ export default function Wizard({ go, initialMode }) {
   };
 
   const html = useMemo(() => (draft.mode === 'designer' ? generateHtml(draft) : draft.html), [draft]);
-  const issues = draft.mode === 'designer' ? validateModel(draft.model, draft.dataSources) : sourcesUsedInHtml(draft.html || '<p></p>').filter((s) => !draft.dataSources.some((d) => d.id === s)).map((s) => ({ msg: `El HTML usa el origen «${s}», que no está definido` }));
+  const issues = draft.mode === 'designer'
+    ? validateModel(draft.model, draft.dataSources)
+    : sourcesUsedInHtml(draft.html || '<p></p>').filter((s) => !draft.dataSources.some((d) => d.id === s)).map((s) => ({ msg: `El HTML usa el origen «${s}», que no está definido` }));
 
   const canNext = () => {
     if (step === 0 && !draft.name.trim()) return 'Indica un nombre para el informe.';
+    if (step === 1 && start === 'auto' && !draft.dataSources.length) return 'Para el diseño automático define al menos un origen de datos.';
     if (step === 2 && manual && !draft.html) return 'Sube un archivo HTML o pega su contenido.';
     if (step === 2 && !manual && !draft.model.rows.length) return 'Añade al menos un componente al lienzo.';
     return '';
@@ -50,10 +57,13 @@ export default function Wizard({ go, initialMode }) {
   const next = () => {
     const e = canNext();
     setError(e);
-    if (!e) {
-      if (step === 0 && draft.mode === 'designer' && !draft.model.title) patch({ model: { ...draft.model, title: draft.name } });
-      setStep(step + 1);
+    if (e) return;
+    if (step === 0 && draft.mode === 'designer' && !draft.model.title) patch({ model: { ...draft.model, title: draft.name } });
+    if (step === 1 && start === 'auto' && !draft.model.rows.length) {
+      const { data } = buildReportData(draft.dataSources, draft.params);
+      patch({ model: { ...autoLayout(draft.dataSources, data, { title: draft.model.title || draft.name, subtitle: draft.description }), theme: draft.model.theme } });
     }
+    setStep(step + 1);
   };
   const finish = () => {
     const saved = createReport({ ...draft, html });
@@ -61,7 +71,7 @@ export default function Wizard({ go, initialMode }) {
   };
 
   return (
-    <div className="page">
+    <div className="page page-wide">
       <div className="page-head">
         <div>
           <button type="button" className="ui-link" onClick={() => go('#/')}><Icon name="back" size={14} /> Informes</button>
@@ -98,8 +108,9 @@ export default function Wizard({ go, initialMode }) {
 
         {step === 1 && (
           <>
-            <p className="ui-hint">Define las consultas SQL que alimentan el informe y revisa el tipo y formato de cada campo. Los componentes se vinculan a estos orígenes por su identificador.</p>
-            <DataSourcesEditor dataSources={draft.dataSources} params={draft.params} usage={sourceUsage(draft.model)} onChange={patch} />
+            <p className="ui-hint">Define las consultas que alimentan el informe con el <b>editor visual</b> (arrastrando tablas) o escribiendo SQL, y revisa el tipo y formato de cada campo.{start === 'auto' ? ' Al continuar se generará un diseño a partir de estos orígenes.' : ''}</p>
+            <DataSourcesEditor dataSources={draft.dataSources} params={draft.params} usage={sourceUsage(draft.model)} onChange={patch}
+              onRename={(from, to) => setDraft((d) => ({ ...d, model: renameSource(d.model, from, to) }))} />
           </>
         )}
 

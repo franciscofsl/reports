@@ -24,6 +24,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm test
       - run: npm run build
       # SPA con hash router: copia de seguridad del index para rutas desconocidas
       - run: cp dist/index.html dist/404.html

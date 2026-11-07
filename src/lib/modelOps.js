@@ -134,9 +134,61 @@ export function validateModel(model, dataSources) {
       const ds = dataSources.find((d) => d.id === c.source);
       if (!ds) continue;
       const names = new Set((ds.fields || []).map((f) => f.name));
-      const used = [c.props.field, c.props.category, c.props.targetField, c.props.sortBy, ...(c.props.values || []), ...(c.props.columns || [])].filter(Boolean);
+      const pr = c.props;
+      const used = [pr.field, pr.category, pr.targetField, pr.sortBy, pr.trendField, pr.x, pr.y, pr.size, c.type === 'scatter' ? pr.color : null, c.type === 'scatter' ? pr.label : null, pr.rows, pr.cols, pr.value, pr.filterField,
+        ...(pr.values || []), ...(pr.columns || []), ...(pr.databars || []), ...(pr.rules || []).map((r) => r.field)].filter(Boolean);
       for (const f of used) if (!names.has(f)) issues.push({ cellId: c.id, msg: `«${c.props.title || c.props.label || c.type}» usa el campo «${f}», que no existe en «${ds.id}»` });
     }
   }
   return issues;
+}
+
+/** Propaga el renombrado de un origen a todos los componentes que lo usan. */
+export function renameSource(model, from, to) {
+  if (!model) return model;
+  return { ...model, rows: model.rows.map((r) => ({ ...r, cells: r.cells.map((c) => (c.source === from ? { ...c, source: to } : c)) })) };
+}
+
+export function removeCells(model, ids) {
+  const set = new Set(ids);
+  return prune({ ...clone(model), rows: model.rows.map((r) => ({ ...r, cells: r.cells.filter((c) => !set.has(c.id)) })) });
+}
+
+export function updateCells(model, ids, patch) {
+  const set = new Set(ids);
+  return { ...model, rows: model.rows.map((r) => ({ ...r, cells: r.cells.map((c) => (set.has(c.id) ? { ...c, ...patch } : c)) })) };
+}
+
+/** Coloca las celdas seleccionadas juntas en una fila, con el mismo ancho. */
+export function arrangeInRow(model, ids) {
+  if (ids.length < 2) return model;
+  const order = [];
+  for (const r of model.rows) for (const c of r.cells) if (ids.includes(c.id)) order.push(c);
+  const span = Math.max(2, Math.floor(12 / order.length));
+  const first = locate(model, order[0].id).r;
+  let m = removeCells(model, ids);
+  const at = Math.min(first, m.rows.length);
+  m = clone(m);
+  m.rows.splice(at, 0, { id: uid('r'), cells: order.map((c) => ({ ...c, span })) });
+  return m;
+}
+
+/** Inserta copias de celdas (con ids nuevos) tras la celda indicada o al final. */
+export function pasteCells(model, cells, afterId) {
+  const copies = cells.map((c) => ({ ...structuredClone(c), id: uid('c') }));
+  let m = model;
+  let prev = afterId && locate(model, afterId) ? afterId : null;
+  for (const c of copies) {
+    m = insertCell(m, c, smartTarget(m, prev, c.span));
+    prev = c.id;
+  }
+  return { model: m, ids: copies.map((c) => c.id) };
+}
+
+/** Inserta una fila completa (bloque reutilizable) con ids nuevos. */
+export function insertRow(model, row, index) {
+  const m = clone(model);
+  const copy = { id: uid('r'), cells: row.cells.map((c) => ({ ...structuredClone(c), id: uid('c') })) };
+  m.rows.splice(index ?? m.rows.length, 0, copy);
+  return { model: m, ids: copy.cells.map((c) => c.id) };
 }

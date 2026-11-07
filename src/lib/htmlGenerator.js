@@ -1,5 +1,10 @@
 // Conversión modelo de diseño <-> HTML del informe, e inyección de datos para la vista previa.
-export const LIB_VERSION = '1.0.0';
+export const LIB_VERSION = '1.1.0';
+/** Versiones publicadas (inmutables). Los informes antiguos siguen apuntando a la suya. */
+export const LIB_VERSIONS = [
+  { value: '1.1.0', label: '1.1.0 (actual): filtros, nuevos componentes, temas' },
+  { value: '1.0.0', label: '1.0.0' },
+];
 export const GENERATOR = 'RptDesigner/0.1';
 
 /** URL absoluta de la librería publicada como estático de la app (CDN propio). */
@@ -27,23 +32,33 @@ function cleanProps(props) {
 export function generateHtml(report) {
   const model = report.model || { rows: [] };
   const lib = libBaseUrl(model.libVersion || LIB_VERSION);
+  const theme = model.theme || {};
   const rows = (model.rows || [])
     .filter((r) => r.cells.length)
     .map((row) => {
       const cells = row.cells
         .map((c) => {
           const src = c.source ? ` data-source="${escHtml(c.source)}"` : '';
-          return `      <div class="rpt-col rpt-col-${c.span || 12}" data-rpt="${escHtml(c.type)}"${src} data-props='${escAttrSingle(JSON.stringify(cleanProps(c.props)))}'></div>`;
+          const style = c.height ? ` style="min-height:${Number(c.height)}px"` : '';
+          return `      <div class="rpt-col rpt-col-${c.span || 12}" data-rpt="${escHtml(c.type)}"${src}${style} data-props='${escAttrSingle(JSON.stringify(cleanProps(c.props)))}'></div>`;
         })
         .join('\n');
       return `    <section class="rpt-row">\n${cells}\n    </section>`;
     })
     .join('\n');
 
-  const layout = { libVersion: model.libVersion || LIB_VERSION, title: model.title, subtitle: model.subtitle, rows: model.rows };
+  const layout = { libVersion: model.libVersion || LIB_VERSION, title: model.title, subtitle: model.subtitle, theme: model.theme, rows: model.rows };
+  const htmlAttrs = [
+    'lang="es-ES"',
+    theme.mode && theme.mode !== 'auto' ? `data-rpt-theme="${escHtml(theme.mode)}"` : '',
+    theme.palette && theme.palette !== 'fluent' ? `data-rpt-palette="${escHtml(theme.palette)}"` : '',
+    theme.density && theme.density !== 'normal' ? `data-rpt-density="${escHtml(theme.density)}"` : '',
+    theme.brand && /^#[0-9a-f]{6}$/i.test(theme.brand) && theme.brand.toLowerCase() !== '#0f6cbd' ? `style="--rpt-brand:${theme.brand}"` : '',
+  ].filter(Boolean).join(' ');
+  const logo = theme.logo && /^(https?:|data:image\/)/.test(theme.logo) ? `\n      <img class="rpt-logo" src="${escHtml(theme.logo)}" alt="Logotipo">` : '';
 
   return `<!doctype html>
-<html lang="es-ES">
+<html ${htmlAttrs}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -55,7 +70,9 @@ export function generateHtml(report) {
 <body class="rpt-body">
   <main class="rpt-report">
     <header class="rpt-report-header">
-      <h1>${escHtml(model.title || report.name)}</h1>${model.subtitle ? `\n      <p>${escHtml(model.subtitle)}</p>` : ''}
+      <div>
+        <h1>${escHtml(model.title || report.name)}</h1>${model.subtitle ? `\n        <p>${escHtml(model.subtitle)}</p>` : ''}
+      </div>${logo}
     </header>
 ${rows}
   </main>
@@ -94,5 +111,5 @@ export function injectData(html, data, { theme } = {}) {
 }
 
 export function emptyModel(title = 'Nuevo informe') {
-  return { libVersion: LIB_VERSION, title, subtitle: '', rows: [] };
+  return { libVersion: LIB_VERSION, title, subtitle: '', theme: { brand: '#0f6cbd', palette: 'fluent', density: 'normal', mode: 'auto', logo: '' }, rows: [] };
 }

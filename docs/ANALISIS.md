@@ -48,11 +48,29 @@
 - El visor publicado es: HTML guardado + `RPT_DATA` inyectado en servidor (una sola petición) o carga diferida vía `rpt-data-url`.
 - Permisos por informe y por origen; registro de quién ejecuta qué consulta.
 
-## 5. Siguientes pasos sugeridos
+## 5. Iteración 2: mejoras incorporadas al prototipo
 
-- Filtros interactivos y *cross-filtering* entre componentes (clic en una porción del donut filtra la tabla).
-- Campos calculados y agregaciones en servidor para orígenes grandes (no traer miles de filas al navegador).
-- Editor SQL con resaltado/autocompletado (Monaco/CodeMirror) y explorador del esquema real.
-- Exportación a PDF/Excel, programación de envíos.
-- Diff visual entre versiones del historial.
-- Tests de regresión visual de la librería (cada versión publicada debe renderizar igual los informes existentes).
+| Área | Implementado | Referencia en productos similares |
+|---|---|---|
+| Interactividad | Componente filtro (desplegable, chips, búsqueda, rango), **filtro cruzado** por nombre de campo, barra de filtros activos, ver detalle | Slicers y *cross-filtering* de Power BI; filtros de Metabase |
+| Exportación | CSV (separador `;` y decimal `,` para Excel en español), PNG de gráficos, imprimir/PDF con CSS de impresión | Menú «…» de cada visual en Power BI / Looker Studio |
+| Componentes | Gauge, combinado con eje secundario, dispersión, tabla dinámica con mapa de calor, sparkline y variación en losetas, formato condicional y barras de datos | Matriz y formato condicional de Power BI; tarjetas con tendencia de Grafana |
+| Tema | Marca, paleta, densidad, claro/oscuro y logo vía atributos y variables CSS | Tokens de Fluent UI (accent, layer, density) |
+| Diseñador | Redimensionar por bordes, multiselección, alinear en fila, copiar/pegar entre informes, vista por dispositivo, diseño automático, bloques reutilizables | Retool/Appsmith (grid + resize), *Quick insights* de Power BI |
+| Consultas | **Editor visual de consultas** (tablas, uniones automáticas por FK, columnas, agregaciones, filtros con parámetros), CodeMirror con autocompletado, campos calculados, orígenes derivados (`origen.<id>`), parámetros de lista y rango de fechas relativos | Query builder de Metabase («Notebook»), diseñador de consultas de DevExpress/Stimulsoft, *calculated fields* de Looker Studio |
+| Ciclo de vida | Publicar versión + visor, comparar versiones (SQL línea a línea), etiquetas, restauración parcial, exportar/importar JSON | Revisiones de Google Docs/Grafana, «Publish» de Power BI |
+| Calidad | Vitest (motor SQL, query builder, operaciones del modelo, plantillas, diff) y Playwright e2e escritorio + móvil en CI; carga diferida (bundle inicial de ~1,1 MB a ~260 KB) | — |
+
+### Editor visual de consultas: decisiones
+
+- **El modelo visual es la fuente de verdad** cuando el origen está en modo visual; el SQL se regenera en cada cambio y se muestra en solo lectura. Pasar a SQL manual es posible en cualquier momento; volver al visual sustituye el SQL (no se intenta interpretar SQL arbitrario, igual que Metabase con sus *native queries*).
+- **Uniones por convención** (`<tabla>_id → <tabla>.id`) al soltar una tabla relacionada; el resto se crea uniendo columnas con dos clics (funciona igual con ratón y táctil).
+- **Filtros incompletos se ignoran** con aviso en lugar de producir `= ''`; los parámetros opcionales generan `(:p IS NULL OR …)`.
+- **Mismo motor** para visual y SQL: lo que se ve en la vista previa es exactamente lo que se ejecutaría.
+
+## 6. Siguientes pasos (fuera del alcance del prototipo)
+
+- Backend real: ejecución de consultas en servidor, permisos, programación de envíos.
+- Relaciones explícitas entre orígenes para filtros cruzados con nombres de campo distintos.
+- Diff visual (lado a lado) entre versiones del diseño.
+- Pruebas de regresión visual de cada versión de RptLib.

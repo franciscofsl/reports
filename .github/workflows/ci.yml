@@ -6,7 +6,7 @@ on:
     branches-ignore: [main]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,4 +15,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Tests unitarios
+        run: npm test
       - run: npm run build
+      - name: Instalar navegador para e2e
+        run: npx playwright install --with-deps chromium
+      - name: Tests e2e (escritorio y móvil)
+        run: npm run test:e2e

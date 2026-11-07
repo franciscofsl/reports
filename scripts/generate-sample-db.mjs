@@ -9,18 +9,30 @@ const pad = (n) => String(n).padStart(2, '0');
 
 const regiones = ['Norte', 'Sur', 'Este', 'Oeste', 'Centro'];
 const ciudades = { Norte: ['Bilbao', 'Santander', 'Oviedo'], Sur: ['Sevilla', 'Málaga', 'Granada'], Este: ['Valencia', 'Barcelona', 'Alicante'], Oeste: ['Badajoz', 'Cáceres', 'Salamanca'], Centro: ['Madrid', 'Toledo', 'Segovia'] };
+const GEO = {
+  Bilbao: ['Bizkaia', 'País Vasco'], Santander: ['Cantabria', 'Cantabria'], Oviedo: ['Asturias', 'Asturias'],
+  Sevilla: ['Sevilla', 'Andalucía'], Málaga: ['Málaga', 'Andalucía'], Granada: ['Granada', 'Andalucía'],
+  Valencia: ['Valencia', 'Comunitat Valenciana'], Barcelona: ['Barcelona', 'Cataluña'], Alicante: ['Alicante', 'Comunitat Valenciana'],
+  Badajoz: ['Badajoz', 'Extremadura'], Cáceres: ['Cáceres', 'Extremadura'], Salamanca: ['Salamanca', 'Castilla y León'],
+  Madrid: ['Madrid', 'Comunidad de Madrid'], Toledo: ['Toledo', 'Castilla-La Mancha'], Segovia: ['Segovia', 'Castilla y León'],
+};
 const nombres = ['Acme', 'Globex', 'Initech', 'Umbrella', 'Hooli', 'Vandelay', 'Stark', 'Wayne', 'Tyrell', 'Soylent', 'Cyberdyne', 'Wonka', 'Oceanic', 'Gekko', 'Massive', 'Aperture', 'Duff', 'Monarch', 'Pied Piper', 'Dunder'];
 const sufijos = ['S.L.', 'S.A.', 'Group', 'Iberia', 'Retail'];
 const segmentos = ['Empresa', 'Pyme', 'Particular'];
 
 const clientes = Array.from({ length: 60 }, (_, i) => {
   const region = pick(regiones);
+  const nombre = `${pick(nombres)} ${pick(sufijos)} ${i + 1}`;
+  const segmento = pick(segmentos);
+  const ciudad = pick(ciudades[region]);
   return {
     id: i + 1,
-    nombre: `${pick(nombres)} ${pick(sufijos)} ${i + 1}`,
-    segmento: pick(segmentos),
+    nombre,
+    segmento,
     region,
-    ciudad: pick(ciudades[region]),
+    ciudad,
+    provincia: GEO[ciudad][0],
+    comunidad: GEO[ciudad][1],
     alta: `20${pick(['21', '22', '23', '24'])}-${pad(int(1, 12))}-${pad(int(1, 28))}`,
     activo: rnd() > 0.15,
   };

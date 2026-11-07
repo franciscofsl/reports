@@ -34,6 +34,25 @@ Prototipo en React de un **asistente para crear informes HTML** con orígenes de
 - **Formato condicional** en tablas (colores por umbral, barras de datos), losetas con **sparkline y variación**.
 - **Imprimir / PDF** con estilos de impresión. Accesibilidad: resumen de cada gráfico para lectores de pantalla y navegación con teclado por sus elementos.
 
+### Modelo semántico (pestaña «Modelo»)
+- **Relaciones entre orígenes**: un filtro viaja por ellas a otros orígenes aunque los campos se llamen distinto (p. ej. un clic en el mapa de `historico.comunidad` filtra `pedidos` mediante `historico.id → pedidos.id`); admite cadenas de varias relaciones y sugiere relaciones candidatas.
+- **Medidas reutilizables** con un lenguaje propio: `SUM`, `AVG`, `MIN`, `MAX`, `MEDIAN`, `COUNT(*)`, `COUNT(DISTINCT x)`, condiciones `SUM(x WHERE estado = 'Entregado')`, `TOTAL(expr)` para «% sobre el total», `DIVIDE`, `ROUND`, `ABS` y aritmética. Se validan al escribir y se usan en cualquier visual (`m:<nombre>`).
+- **Jerarquías y profundizar**: año → trimestre → mes → día (o campos propios); clic para bajar de nivel y migas para subir (`h:<nombre>`).
+- **Selección asociativa** (estilo Qlik): lo excluido se muestra en gris en lugar de desaparecer.
+
+### Exploración y analítica
+- **Informes multipágina** con pestañas; los filtros se sincronizan entre páginas (o se limitan a la suya) y hay **filtros a nivel de informe** en un panel que no ocupa el lienzo.
+- **Vistas guardadas (marcadores)**: guardan filtros, nivel de profundización, página y parámetros; se aplican con un clic y se comparten por **enlace** (`#/view/<id>?v=…`).
+- **Comparación temporal** (vs periodo anterior o mismo periodo del año pasado) en gráficos, losetas y KPI; **líneas de referencia** (media, mediana, mín., máx., objetivo, tendencia); **previsión** con intervalo de confianza; **detección de anomalías**; **narrativa automática** que describe total, evolución, causante del cambio, reparto y valores inusuales.
+- **Nuevas visualizaciones**: mapa de coropletas de España (comunidades y provincias), cascada, embudo, treemap, calendario de calor, bullet, Sankey y **múltiplos pequeños**; **iconos y semáforos** en el formato condicional y **sparklines** en tablas (también desde otro origen).
+- **Show Me**: eliges campos o medidas y propone los visuales más adecuados, con vista previa.
+- **Temas JSON** importables y exportables, compatibles con los temas de Power BI (`dataColors`, `tableAccent`, `background`, fuente).
+
+### Informes paginados y exportación
+- **Diseño de página**: tamaño (A4/A3/Carta), orientación, márgenes, encabezado, pie, «Página X de Y» y fecha de impresión; **saltos de página** (componente y por grupo); la cabecera de tabla se repite en cada página y al imprimir las tablas muestran todas sus filas.
+- **Tablas agrupadas** (hasta dos niveles) con subtotales plegables y **subinformes** (incrusta otro informe con sus orígenes; hereda parámetros homónimos y responde a los filtros).
+- **Exportación**: PDF (impresión con el diseño de página), **Word (.docx)** con encabezado/pie, numeración, KPI, gráficos como imagen y tablas con cabecera repetida, y **Excel (.xlsx)** con hoja de resumen, imágenes y una hoja por tabla con formatos numéricos, agrupación en esquema, totales, autofiltro y cabecera fija.
+
 ### Ciclo de vida
 - **Historial**: cada guardado crea una versión; ver, descargar, **etiquetar**, **comparar dos versiones** (componentes, SQL línea a línea, parámetros, tema) y **restaurar total o parcialmente** (diseño, orígenes o parámetros).
 - **Borrador / publicado**: publica una versión y compártela con el **visor** (`#/view/<id>`).
@@ -42,12 +61,12 @@ Prototipo en React de un **asistente para crear informes HTML** con orígenes de
 
 ## Librería RptLib
 
-Versiones publicadas como estáticos **inmutables** (`public/lib/rptlib/<versión>/`): `1.0.0` (inicial) y `1.1.0` (actual). Cada informe apunta a la suya, así que los informes antiguos no cambian al publicar una versión nueva; se pueden actualizar desde el panel *Informe → Librería*.
+Versiones publicadas como estáticos **inmutables** (`public/lib/rptlib/<versión>/`): `1.0.0`, `1.1.0` y `1.2.0` (actual). La 1.2.0 se construye desde los módulos de `lib-src/rptlib-1.2/` (`npm run build:lib`, se ejecuta también antes de `npm run build`) y carga bajo demanda los contornos de los mapas (`maps/es.js`, generados con `npm run build:maps` a partir de es-atlas / IGN). Cada informe apunta a la suya, así que los informes antiguos no cambian al publicar una versión nueva; se pueden actualizar desde el panel *Informe → Librería*.
 
 ```html
 <html lang="es-ES" data-rpt-palette="ocean" style="--rpt-brand:#8764b8">
-<link rel="stylesheet" href="https://<host>/lib/rptlib/1.1.0/rptlib.css">
-<script src="https://<host>/lib/rptlib/1.1.0/rptlib.js" defer></script>
+<link rel="stylesheet" href="https://<host>/lib/rptlib/1.2.0/rptlib.css">
+<script src="https://<host>/lib/rptlib/1.2.0/rptlib.js" defer></script>
 
 <body class="rpt-body">
   <main class="rpt-report">
@@ -73,8 +92,20 @@ Datos: `window.RPT_DATA = { sources: { <id>: { fields: [...], rows: [...] } } }`
 | `scatter` | `x`, `y`, `size`, `color`, `label` |
 | `grid` | `columns[]`, `pageSize`, `search`, `totals`, `sortBy`, `filterField`, `databars[]`, `rules[]` |
 | `pivot` | `rows`, `cols`, `value`, `agg`, `totals`, `heatmap` |
+| `map` | `geo` (es-comunidades, es-provincias), `field`, `value`, `agg` |
+| `treemap` | `category`, `group`, `value`, `agg` |
+| `calendar` | `dateField`, `value`, `agg`, `years` |
+| `bullet` | `category`, `value`, `target` / `targetField`, `ranges[]` |
+| `sankey` | `levels[]`, `value`, `agg` |
+| `waterfall`, `funnel` | `category`, `values[]`, `agg` |
+| `narrative` | `field`, `agg`, `timeField`, `grain`, `category` |
+| `subreport` | `report` (id del informe) |
 
-API: `RptLib.render()`, `renderComponent()`, `setFilter()`, `clearFilters()`, `getFilters()`, `onFilters(fn)`, `exportCsv()`. El host puede enviar `postMessage({type:'rpt:print'|'rpt:clearFilters'|'rpt:setFilters'})`.
+Opciones de 1.2 en gráficos: `category: "h:<jerarquía>"`, `values: ["m:<medida>"]`, `compare` (prev, yoy), `refLines[]`, `forecast`, `anomalies`, `splitBy`. En losetas y KPI: `compare`, `dateField`, `grain`. En tablas: `groupBy[]`, `subtotals`, `groupPageBreak`, `sparklines[]`. En filtros: `part` (year, quarter, month), `sync`.
+
+Modelo semántico en el HTML: `<script type="application/json" id="rpt-semantic">{ "relations": [...], "measures": [...], "hierarchies": [...], "associative": false }</script>`. Páginas: `<section class="rpt-page" data-page="id" data-title="Nombre">`. Filtros del informe: atributo `data-rpt-filters` en `.rpt-report`.
+
+API: `RptLib.render()`, `renderComponent()`, `setFilter()`, `clearFilters()`, `getFilters()`, `getState()`/`setState()`, `onFilters(fn)`, `compileMeasure()`, `collect()`, `exportCsv()`. El host puede enviar `postMessage({type:'rpt:print'|'rpt:clearFilters'|'rpt:setFilters'|'rpt:setState'|'rpt:collect'})` y recibe `rpt:ready`, `rpt:state` y `rpt:collected`.
 
 ## Desarrollo
 

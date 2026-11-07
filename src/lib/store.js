@@ -33,8 +33,8 @@ export function listReports() {
   // Primera ejecución: semilla con informes de ejemplo creados a partir de las plantillas.
   const seeds = [
     ['Inventario (ejemplo)', 'Campos calculados, origen derivado y rango de fechas.', inventoryTemplate()],
-    ['Equipo comercial (ejemplo)', 'Ventas frente a objetivo, combinado, dispersión y tabla dinámica.', salesTeamTemplate()],
-    ['Ventas 2025 (ejemplo)', 'Filtros, filtro cruzado, gauge y tabla con formato condicional.', salesTemplate()],
+    ['Equipo comercial (ejemplo)', 'Ventas frente a objetivo: bullet, combinado, dispersión, semáforos, sparklines y tabla dinámica.', salesTeamTemplate()],
+    ['Ventas 2025 (ejemplo)', '3 páginas con modelo semántico, profundizar, comparación interanual, previsión, mapa, Sankey y tabla agrupada.', salesTemplate()],
   ];
   let all = [];
   for (const [name, description, t] of seeds) {
@@ -68,6 +68,7 @@ function persist(report, note, list) {
     model: saved.model,
     dataSources: saved.dataSources,
     params: saved.params,
+    semantic: saved.semantic,
   };
   write(K_VERSIONS(report.id), [snapshot, ...versions].slice(0, MAX_VERSIONS));
   const others = list.filter((r) => r.id !== report.id);
@@ -106,9 +107,9 @@ export function restoreVersion(reportId, versionId, parts = ['design', 'data', '
   if (!r || !v) throw new Error('Versión no encontrada');
   const next = { ...r };
   if (parts.includes('design')) Object.assign(next, { mode: v.mode, html: v.html, model: v.model });
-  if (parts.includes('data')) next.dataSources = v.dataSources;
+  if (parts.includes('data')) { next.dataSources = v.dataSources; next.semantic = v.semantic; }
   if (parts.includes('params')) next.params = v.params;
-  const what = parts.length === 3 ? '' : ` (${parts.map((x) => ({ design: 'diseño', data: 'orígenes', params: 'parámetros' })[x]).join(', ')})`;
+  const what = parts.length === 3 ? '' : ` (${parts.map((x) => ({ design: 'diseño', data: 'orígenes y modelo', params: 'parámetros' })[x]).join(', ')})`;
   return saveReport(next, `Restaurada la versión ${v.n}${what}`);
 }
 
@@ -187,3 +188,15 @@ export function deleteBlock(id) {
 const K_CLIP = 'rpt.clipboard.v1';
 export const readClipboard = () => read(K_CLIP, null);
 export const writeClipboard = (cells) => { try { write(K_CLIP, cells); } catch { /* noop */ } };
+
+/* ---------- Vistas guardadas (marcadores): estado de filtros, profundización, página y parámetros ---------- */
+export const listBookmarks = (reportId) => getReport(reportId)?.bookmarks || [];
+export function saveBookmark(reportId, bookmark) {
+  const list = listBookmarks(reportId).filter((b) => b.name !== bookmark.name);
+  const bm = { id: uid('bm'), date: new Date().toISOString(), ...bookmark };
+  patchReport(reportId, { bookmarks: [bm, ...list].slice(0, 30) });
+  return bm;
+}
+export function deleteBookmark(reportId, id) {
+  patchReport(reportId, { bookmarks: listBookmarks(reportId).filter((b) => b.id !== id) });
+}

@@ -33,7 +33,7 @@ export default function App() {
   let page;
   if (parts[0] === 'new') page = <Wizard key={hash} go={go} initialMode={new URLSearchParams(query).get('mode')} />;
   else if (parts[0] === 'report' && parts[1]) page = <ReportEditor key={parts[1]} id={parts[1]} tab={parts[2] || 'preview'} go={go} />;
-  else if (parts[0] === 'view' && parts[1]) page = <Viewer key={parts[1]} id={parts[1]} go={go} />;
+  else if (parts[0] === 'view' && parts[1]) page = <Viewer key={parts[1]} id={parts[1]} go={go} query={query} />;
   else page = <ReportList reports={reports} go={go} />;
 
   return (

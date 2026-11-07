@@ -38,7 +38,7 @@ export default function Icon({ name, path, size = 18, className = '', title }) {
     <svg className={`ui-icon ${className}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden={title ? undefined : true} role={title ? 'img' : undefined}>
       {title && <title>{title}</title>}
-      <path d={path || P[name] || ''} />
+      <path d={path || P[name] || (name && /^[Mm][\d.]/.test(name) ? name : '')} />
     </svg>
   );
 }

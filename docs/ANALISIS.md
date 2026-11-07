@@ -68,9 +68,27 @@
 - **Filtros incompletos se ignoran** con aviso en lugar de producir `= ''`; los parámetros opcionales generan `(:p IS NULL OR …)`.
 - **Mismo motor** para visual y SQL: lo que se ve en la vista previa es exactamente lo que se ejecutaría.
 
-## 6. Siguientes pasos (fuera del alcance del prototipo)
+## 6. Iteración 3: modelo semántico, analítica y paginados
 
-- Backend real: ejecución de consultas en servidor, permisos, programación de envíos.
-- Relaciones explícitas entre orígenes para filtros cruzados con nombres de campo distintos.
+| Área | Implementado | Referencia |
+|---|---|---|
+| Relaciones | Grafo de relaciones entre orígenes; el filtro se traduce a claves y viaja por caminos de hasta 4 saltos (además de la relación implícita por nombre de campo) | Relaciones del modelo de Power BI, *explores* de Looker |
+| Medidas | Lenguaje de expresiones propio evaluado por grupo, con `TOTAL()` para porcentajes, condiciones `WHERE`, división segura; validación en vivo | DAX (`CALCULATE`, `DIVIDE`), medidas LookML |
+| Jerarquías | Niveles por campo o por parte de fecha; profundizar por visual con migas; el último nivel filtra el informe | Drill down de Power BI / Tableau |
+| Exploración | Páginas con filtros sincronizados o locales, panel de filtros de informe, marcadores con enlace que codifica el estado, selección asociativa | Bookmarks y *sync slicers* de Power BI; modelo asociativo de Qlik |
+| Analítica | Comparación prev/YoY, líneas de referencia, previsión lineal con intervalo del 95 %, anomalías (z robusta sobre residuos), narrativa automática | Panel de análisis de Power BI/Tableau, *Smart narrative* |
+| Visualizaciones | Mapa (contornos IGN cargados bajo demanda), cascada, embudo, treemap squarified, calendario, bullet, Sankey, múltiplos pequeños, iconos/semáforos, sparklines | Visuales estándar de Power BI y Tableau |
+| Autor | Show Me por reglas (tipo de campo, cardinalidad, tiempo, geografía, etapas) con vista previa; temas JSON compatibles con Power BI | «Show Me» de Tableau, temas de Power BI |
+| Paginados | `@page` con márgenes, cabecera, pie, numeración y fecha; saltos por componente y por grupo; tablas agrupadas con subtotales; subinformes; exportación DOCX/XLSX a partir del contenido real del informe | SSRS, Stimulsoft, Crystal Reports |
+
+Decisiones:
+
+- **Una sola fuente de verdad para exportar**: la librería, dentro del informe, recopila lo que el lector ve (filtros aplicados, imágenes de los gráficos, valores reales de las tablas y grupos) y la app genera los ficheros. Así Word, Excel y PDF coinciden con la pantalla.
+- **Medidas evaluadas en el cliente sobre las filas del visual**: en producción conviene empujar la agregación al servidor para orígenes grandes (ver siguientes pasos).
+- **Mapas como recurso estático versionado** junto a la librería (≈190 KB, solo se descarga si el informe tiene un mapa).
+
+## 7. Siguientes pasos (fuera del alcance del prototipo)
+
+- Backend real: ejecución de consultas y agregaciones en servidor, permisos, seguridad por filas, envíos programados y alertas.
 - Diff visual (lado a lado) entre versiones del diseño.
 - Pruebas de regresión visual de cada versión de RptLib.

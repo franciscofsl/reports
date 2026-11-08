@@ -3,6 +3,8 @@
 Prototipo en React de un **asistente para crear informes HTML** con orígenes de datos SQL (simulados), un **editor visual de arrastrar y soltar**, un **editor visual de consultas** y una **librería propia de componentes** (estilo Fluent) servida por URL.
 
 > Análisis, comparación con productos similares y recomendaciones: [`docs/ANALISIS.md`](docs/ANALISIS.md).
+>
+> Plan por fases para llevarlo al producto real (.NET 10 + ABP + Blazor): [`docs/plan-producto/README.md`](docs/plan-producto/README.md).
 
 ## Funcionalidades
 

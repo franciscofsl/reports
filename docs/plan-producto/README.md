@@ -1,8 +1,18 @@
 # Plan de implementación: del prototipo al producto
 
-Este documento ordena en fases el trabajo para llevar las funcionalidades del **prototipo** (este repositorio, React + RptLib) al **producto real** (backend .NET 10 con ABP y frontend Blazor).
+Este documento ordena en fases el trabajo para llevar las funcionalidades del **prototipo** (este repositorio, React + RptLib) al **producto real**: backend .NET 10 con ABP, frontend **Blazor WebAssembly** y base de datos **SQL Server**.
 
-> **Para quien implemente:** durante la implementación se tendrá acceso al código del prototipo. Cada fase indica qué ficheros del prototipo sirven de **especificación** y cuáles se pueden **reutilizar casi tal cual**. El prototipo es la referencia funcional (comportamiento, casos límite, mensajes); sus tests (`tests/*.test.js`) y e2e (`e2e/*.spec.js`) son la especificación ejecutable que hay que mantener en verde o portar.
+> **Para quien implemente:** durante la implementación se tendrá acceso al código del prototipo. Cada fase indica qué ficheros del prototipo sirven de **especificación** y cuáles se **portan** o **reutilizan**. El prototipo es la referencia funcional (comportamiento, casos límite, mensajes, estilos y organización de pantallas). Sus tests (`tests/*.test.js`) y e2e (`e2e/*.spec.js`) son la especificación ejecutable que hay que portar.
+
+### Condiciones del producto que guían el plan
+
+| Condición | Consecuencia en el plan |
+|---|---|
+| Ya existe JS/CSS de informes, pero se **pega dentro del HTML generado** | La Fase 1 empieza extrayendo ese código tal cual a una librería versionada, migra los informes para que la **enlacen** y después la unifica con RptLib. |
+| **SQL Server** | Dialecto T-SQL en todo el plan: `@parámetros`, `TOP`/`OFFSET…FETCH`, `[identificadores]`, `DATEPART`/`EOMONTH`. Validación con el analizador oficial de T-SQL (ScriptDom). |
+| **Mínimas dependencias** | En el navegador, **cero librerías JS de terceros** (ni React, ni CodeMirror, ni alasql, ni docx/exceljs). En .NET, solo paquetes de Microsoft. Ver la [política de dependencias](#27-política-de-dependencias). |
+| **Blazor WebAssembly** | El diseñador se hace **en Blazor**, con módulos JS pequeños y propios solo para lo que Blazor no puede hacer (arrastre con puntero, pintar RptLib, `postMessage`). La lógica del modelo se porta a una **biblioteca C# compartida** entre el servidor y el cliente WASM. |
+| **Librería corporativa de controles** | Las pantallas replican **tal cual** los estilos y la organización del prototipo. Donde ya hay controles corporativos maquetados para lo mismo, se usan esos. La alineación final se hace en la [Fase 14](#fase-14--revisión-visual-con-la-librería-corporativa). |
 
 ---
 
@@ -12,20 +22,22 @@ Este documento ordena en fases el trabajo para llevar las funcionalidades del **
 2. [Decisiones de arquitectura](#2-decisiones-de-arquitectura)
 3. [Mapa prototipo → producto](#3-mapa-prototipo--producto)
 4. [Fases](#4-fases)
-   - [Fase 0 · Preparación y contratos](#fase-0--preparación-y-contratos)
-   - [Fase 1 · RptLib como librería CSS/JS independiente](#fase-1--rptlib-como-librería-cssjs-independiente)
-   - [Fase 2 · Modelo de dominio y API del informe (ABP)](#fase-2--modelo-de-dominio-y-api-del-informe-abp)
-   - [Fase 3 · Motor de datos en servidor](#fase-3--motor-de-datos-en-servidor)
-   - [Fase 4 · Visor de informes en Blazor](#fase-4--visor-de-informes-en-blazor)
-   - [Fase 5 · SDK del diseñador (isla JS) y su envoltorio Blazor](#fase-5--sdk-del-diseñador-isla-js-y-su-envoltorio-blazor)
-   - [Fase 6 · Diseñador de consultas y orígenes de datos](#fase-6--diseñador-de-consultas-y-orígenes-de-datos)
-   - [Fase 7 · Pantalla de creación y edición](#fase-7--pantalla-de-creación-y-edición)
-   - [Fase 8 · Listado de informes](#fase-8--listado-de-informes)
-   - [Fase 9 · Dashboard personalizable](#fase-9--dashboard-personalizable)
-   - [Fase 10 · Modelo semántico, analítica y paginados](#fase-10--modelo-semántico-analítica-y-paginados)
-   - [Fase 11 · Exportación en servidor y envíos programados](#fase-11--exportación-en-servidor-y-envíos-programados)
-   - [Fase 12 · Endurecimiento](#fase-12--endurecimiento)
-5. [Dependencias entre fases](#5-dependencias-entre-fases)
+   - [Fase 0 · Inventario, contratos y decisiones](#fase-0--inventario-contratos-y-decisiones)
+   - [Fase 1 · Librería de informes separada (CSS/JS)](#fase-1--librería-de-informes-separada-cssjs)
+   - [Fase 2 · Núcleo C# compartido (`Reporting.Core`)](#fase-2--núcleo-c-compartido-reportingcore)
+   - [Fase 3 · Modelo de dominio y API del informe (ABP)](#fase-3--modelo-de-dominio-y-api-del-informe-abp)
+   - [Fase 4 · Motor de datos en SQL Server](#fase-4--motor-de-datos-en-sql-server)
+   - [Fase 5 · Visor de informes y exportación](#fase-5--visor-de-informes-y-exportación)
+   - [Fase 6 · Diseñador visual del informe (Blazor)](#fase-6--diseñador-visual-del-informe-blazor)
+   - [Fase 7 · Diseñador de consultas y orígenes de datos](#fase-7--diseñador-de-consultas-y-orígenes-de-datos)
+   - [Fase 8 · Pantalla de creación y edición](#fase-8--pantalla-de-creación-y-edición)
+   - [Fase 9 · Listado de informes](#fase-9--listado-de-informes)
+   - [Fase 10 · Dashboard personalizable](#fase-10--dashboard-personalizable)
+   - [Fase 11 · Modelo semántico, analítica y paginados](#fase-11--modelo-semántico-analítica-y-paginados)
+   - [Fase 12 · Envíos programados](#fase-12--envíos-programados)
+   - [Fase 13 · Endurecimiento](#fase-13--endurecimiento)
+   - [Fase 14 · Revisión visual con la librería corporativa](#fase-14--revisión-visual-con-la-librería-corporativa)
+5. [Dependencias entre fases e hitos](#5-dependencias-entre-fases-e-hitos)
 6. [Riesgos principales](#6-riesgos-principales)
 7. [Definición de terminado (todas las fases)](#7-definición-de-terminado-todas-las-fases)
 
@@ -37,87 +49,121 @@ Este documento ordena en fases el trabajo para llevar las funcionalidades del **
 
 | Área | Estado |
 |---|---|
-| Stack | Backend .NET 10 + ABP; frontend Blazor. |
+| Stack | .NET 10 + ABP, Blazor WebAssembly, SQL Server, librería corporativa de controles. |
 | Creación de informes | Se sube un HTML y se definen consultas; el informe se genera con ellas. Sin diseñador visual de informe ni de consultas. |
-| Librería de componentes | No existe como recurso separado: cada HTML lleva (o enlaza de forma ad hoc) su propio CSS/JS. |
-| Páginas | 1) **Listado** de informes filtrado por permisos. 2) **Creación/edición** de informes. 3) **Dashboard** personalizable donde el usuario añade informes. |
+| JS/CSS de informes | **Existe**, pero al generar el informe se **pega dentro del HTML** (cada informe lleva su copia: pesado, sin caché, sin versiones; arreglar un fallo obliga a regenerar los informes). |
+| Páginas | 1) **Listado** de informes filtrado por permisos. 2) **Creación/edición**. 3) **Dashboard** personalizable donde el usuario añade informes. |
 
 ### Prototipo (este repositorio)
 
 | Área | Dónde está |
 |---|---|
-| Librería RptLib 1.2 (componentes, filtros, filtro cruzado, modelo semántico, analítica, paginados) | `lib-src/rptlib-1.2/*.js`, `public/lib/rptlib/<versión>/`, `scripts/build-rptlib.mjs`, `scripts/build-maps.mjs` |
+| Librería RptLib 1.2 (componentes, filtros, filtro cruzado, modelo semántico, analítica, paginados) | `lib-src/rptlib-1.2/*.js`, `public/lib/rptlib/1.2.0/`, `scripts/build-rptlib.mjs` (concatenación con Node, sin dependencias), `public/lib/rptlib/1.2.0/maps/es.js` |
 | Modelo del informe ↔ HTML | `src/lib/htmlGenerator.js` |
 | Operaciones sobre el modelo (insertar, mover, validar, renombrar orígenes) | `src/lib/modelOps.js` |
 | Catálogo de componentes y esquema de propiedades | `src/lib/catalog.js` |
-| Diseñador visual, panel de propiedades, Show Me, diseño automático, temas | `src/components/Designer.jsx`, `PropertyPanel.jsx`, `ShowMePanel.jsx`, `src/lib/autoLayout.js`, `showMe.js`, `themes.js`, `templates.js` |
+| Diseñador, panel de propiedades, Show Me, diseño automático, temas, plantillas | `src/components/Designer.jsx`, `PropertyPanel.jsx`, `ShowMePanel.jsx`, `LiveComponent.jsx`, `src/lib/autoLayout.js`, `showMe.js`, `themes.js`, `templates.js` |
 | Editor visual de consultas, SQL → visual, editor SQL | `src/lib/queryBuilder.js`, `sqlToBuilder.js`, `src/components/QueryBuilder.jsx`, `SqlEditor.jsx`, `DataSourcesEditor.jsx` |
-| Motor de consultas simulado (alasql), parámetros, campos calculados, orígenes derivados | `src/lib/sqlEngine.js`, `src/lib/reportData.js` |
-| Modelo semántico (relaciones, medidas, jerarquías) | `src/components/SemanticEditor.jsx`, `lib-src/rptlib-1.2/10-semantic.js` |
+| Motor de consultas simulado (alasql), parámetros, campos calculados, orígenes derivados, subinformes | `src/lib/sqlEngine.js`, `src/lib/reportData.js` |
+| Modelo semántico | `src/components/SemanticEditor.jsx`, `lib-src/rptlib-1.2/10-semantic.js` |
 | Vista previa aislada, parámetros, marcadores, exportación | `src/components/ReportFrame.jsx`, `ParamsBar.jsx`, `src/lib/exporters.js` |
 | Historial, comparación, publicación | `src/lib/store.js`, `src/lib/diff.js`, `src/components/HistoryTab.jsx` |
 | Páginas | `src/pages/ReportList.jsx`, `Wizard.jsx`, `ReportEditor.jsx`, `Viewer.jsx` |
+| Estilos de la aplicación (pantallas, no informes) | `src/styles.css` (prefijos `ui-`, `dz-`…) |
 | Análisis y decisiones de diseño | `docs/ANALISIS.md` |
 
-Lo que el prototipo **simula** y el producto debe hacer de verdad: persistencia (`localStorage` en `store.js`), base de datos (JSON + alasql en `sqlEngine.js`), esquema y relaciones (deducidos por convención en `getSchema()`/`getRelations()`), permisos y compartición.
+Lo que el prototipo **simula** y el producto debe hacer de verdad: persistencia (`localStorage` en `store.js`), base de datos (JSON + alasql), esquema y relaciones (deducidos por convención en `getSchema()`/`getRelations()`), permisos y compartición.
 
 ---
 
 ## 2. Decisiones de arquitectura
 
-Conviene registrarlas como ADR en la Fase 0. Estas son las recomendaciones:
+Se registran como ADR en la Fase 0.
 
 ### 2.1 El modelo JSON es la fuente de verdad; el HTML es un artefacto
 
-Igual que en el prototipo (`docs/ANALISIS.md`, §3): el diseñador edita un JSON (`pages → rows → cells → { type, source, props, span }`) y se genera el HTML declarativo (`data-rpt`, `data-source`, `data-props`) que pinta RptLib. El HTML **nunca** contiene SQL. Se mantiene el flujo de **HTML manual** (el actual del producto) como `Mode = Manual`.
+Igual que en el prototipo (`docs/ANALISIS.md`, §3): el diseñador edita un JSON (`pages → rows → cells → { type, source, props, span }`) y se genera un HTML declarativo (`data-rpt`, `data-source`, `data-props`) que pinta la librería. El HTML **nunca** contiene SQL ni el código de la librería: solo la **enlaza**. El flujo actual de subir HTML se mantiene como `Mode = Manual`.
 
-### 2.2 Blazor para el «armazón», islas JS para los editores ricos
+### 2.2 Diseñador en Blazor WebAssembly con módulos JS mínimos
 
-El diseñador de arrastrar y soltar, el lienzo del editor de consultas, CodeMirror y el panel de propiedades son ~3.000 líneas de interacción muy fina (arrastre, redimensionado, multiselección, táctil, deshacer). Reescribirlas en Blazor es caro y arriesgado.
+Con WebAssembly, C# se ejecuta en el navegador, la interop con JS es en proceso y no hay límites de SignalR. Eso hace viable el diseñador en Blazor sin arrastrar React:
 
-**Recomendación:** empaquetar esos editores como un **SDK JS** (`rpt-designer`) que se monta en un `<div>` desde un componente Blazor mediante JS interop (`RptDesigner.mount(el, options) → handle`). Internamente puede seguir usando React (reutilizando el código del prototipo); para Blazor es una caja negra con una API pequeña.
-
-| Lo hace Blazor (ABP) | Lo hace la isla JS |
+| En Blazor (C#) | En módulos JS propios (ES modules, sin dependencias) |
 |---|---|
-| Rutas, menú, permisos, layout, formularios de metadatos (nombre, descripción, carpeta, permisos), guardar/publicar, listado, historial (lista), dashboard | Lienzo del diseñador, panel de propiedades, editor visual de consultas, editor SQL, editor del modelo semántico, comparación visual de versiones |
-| Llama a los *Application Services* | Llama a la API solo a través de un **adaptador de host** que le inyecta Blazor (ver Fase 5) |
+| Todo el estado del editor (modelo, selección, deshacer/rehacer), panel de propiedades generado desde el catálogo, editor de orígenes, parámetros, modelo semántico, historial, asistente, listado, dashboard | `rptCanvas.js`: arrastre, soltar y redimensionar con eventos de puntero (ratón y táctil). Solo emite **intenciones** («mover celda X a fila Y, posición Z», «ancho = 6»); el modelo lo cambia C#. |
+| Validaciones, generación de HTML y de SQL (vía `Reporting.Core`) | `rptLive.js`: pinta cada componente del lienzo con `RptLib.renderComponent()`, como `LiveComponent.jsx` (WYSIWYG real con la misma librería). |
+| Llamadas a la API con los proxies HTTP de ABP | `rptQueryCanvas.js`: posiciones de las tablas y líneas SVG de las uniones del editor visual de consultas. |
+| | `rptSqlEditor.js`: editor SQL ligero (`textarea` con capa de resaltado y lista de autocompletado; las sugerencias las calcula C#). |
+| | `reportBridge.js`: `postMessage` con el iframe del informe. `download.js`: descargar ficheros. |
 
-Alternativa (no recomendada para la primera entrega): reescritura completa en Blazor con interop solo para arrastrar/soltar y CodeMirror. Se puede abordar más adelante pantalla a pantalla si el equipo lo prefiere, usando el SDK como referencia.
+Cada módulo JS debe ser pequeño (orientativo: menos de 300 líneas) y no contener lógica de negocio: esa vive en C# y tiene tests.
 
-> **Blazor Server:** el límite por defecto de mensaje de SignalR es 32 KB. El modelo de un informe grande lo supera. La isla no debe devolver el modelo completo por interop en cada cambio: mantiene el estado en JS, notifica solo `dirty`/`valid`, y al guardar envía la definición **directamente por HTTP** a la API (con el token/antiforgery de ABP) o la trocea. En Blazor WebAssembly el problema no existe, pero se mantiene la misma API para no depender del modo de hospedaje.
+### 2.3 Núcleo C# compartido entre servidor y cliente
 
-### 2.3 Las consultas se ejecutan y se generan en el servidor
+Una biblioteca `Reporting.Core` (`net10.0`, **sin dependencias**) contiene la definición del informe, el catálogo de componentes, las operaciones sobre el modelo, la validación, el generador de HTML, el generador de T-SQL del editor visual, la resolución de parámetros y fechas relativas y la comparación de versiones. La usan:
 
-- El servidor es la **autoridad**: genera el SQL del editor visual (dialecto real), valida, enlaza parámetros, aplica límites y ejecuta con un usuario de solo lectura.
-- El cliente nunca envía SQL para ejecutar en el visor: envía el **id del informe/versión y valores de parámetros**. Solo en el editor (vista previa sin guardar) se envía la definición, y solo con un permiso específico.
-- Las medidas del modelo semántico siguen evaluándose en RptLib sobre las filas del origen (como en el prototipo); la agregación en servidor para orígenes grandes se aborda en la Fase 12.
+- el **cliente WASM**: respuesta inmediata en el editor (SQL generado al momento, validación, HTML de la vista previa);
+- el **servidor**: autoridad. Regenera el HTML y el SQL al guardar y al ejecutar; nunca se fía de lo que envía el cliente.
 
-### 2.4 RptLib versionada e inmutable, servida por URL
+Lo que necesita dependencias pesadas o acceso a datos (ScriptDom, ADO.NET, Open XML) **solo** está en el servidor, para no engordar la descarga WASM.
 
-`/lib/rptlib/<versión>/rptlib.{css,js}` con `Cache-Control: public, max-age=31536000, immutable`. Cada informe apunta a su versión (`model.libVersion`); publicar una versión nueva no cambia los informes existentes. Se conservan **todas** las versiones publicadas en el despliegue.
+### 2.4 Las consultas se ejecutan en el servidor
 
-### 2.5 Aislamiento del informe
+- El visor envía el **id del informe/versión y valores de parámetros**, nunca SQL.
+- El editor puede pedir una vista previa de una definición sin guardar, solo con permiso de edición (y `EditSql` si contiene SQL libre).
+- Validación con ScriptDom (solo `SELECT`, solo tablas expuestas), `SqlParameter` tipados, usuario de BD de solo lectura, timeout y límite de filas.
+- Las medidas del modelo semántico siguen evaluándose en la librería sobre las filas del origen (como en el prototipo); la agregación en servidor para orígenes grandes llega en la Fase 13.
 
-El informe se pinta en `<iframe sandbox="allow-scripts">` **sin** `allow-same-origin` (como `ReportFrame.jsx`). Consecuencia: el iframe tiene origen nulo, no envía cookies y no puede llamar a la API autenticada. Por eso los datos se **inyectan** en el HTML desde el servidor (`window.RPT_DATA`, ver `injectData()`), o se usa `rpt-data-url` con un **token firmado de corta duración**. La comunicación host ↔ informe es por `postMessage` (`rpt:ready`, `rpt:state`, `rpt:setState`, `rpt:collect`, `rpt:print`…).
+### 2.5 Librería de informes versionada e inmutable
 
-### 2.6 Estructura propuesta de la solución
+`/lib/rptlib/<versión>/rptlib.{css,js}` con `Cache-Control: public, max-age=31536000, immutable`. Cada informe apunta a su versión (`model.libVersion`); publicar una versión nueva no cambia los informes existentes. Se conservan todas las versiones publicadas.
+
+### 2.6 Aislamiento del informe
+
+El informe se pinta en `<iframe sandbox="allow-scripts">` **sin** `allow-same-origin` (como `ReportFrame.jsx`). El iframe tiene origen nulo y no puede usar el token de la aplicación WASM, así que los datos se **inyectan** en el HTML desde el servidor (`window.RPT_DATA`, ver `injectData()`) o se descargan con un **token firmado de un solo uso y corta duración** (`<meta name="rpt-data-url">`). La comunicación host ↔ informe es por `postMessage` (`rpt:ready`, `rpt:state`, `rpt:setState`, `rpt:collect`, `rpt:print`…).
+
+### 2.7 Política de dependencias
+
+| Ámbito | Permitido | Evitado (y su sustituto) |
+|---|---|---|
+| JS en el navegador (librería e informes) | Nada de terceros: JS propio | — |
+| JS en el navegador (aplicación) | Módulos JS propios | React → Blazor; CodeMirror → `rptSqlEditor.js`; alasql → servidor; `docx`/`exceljs` → exportación en servidor |
+| .NET servidor | Lo que ya trae la plantilla de ABP; `Microsoft.Data.SqlClient` (ADO.NET, sin Dapper); `Microsoft.SqlServer.TransactSql.ScriptDom` (validar y analizar T-SQL); `DocumentFormat.OpenXml` (Word/Excel) | Dapper, ClosedXML, generadores de PDF de terceros |
+| .NET cliente WASM | Lo que ya trae ABP + `Reporting.Core` | Paquetes de componentes de terceros (se usa la librería corporativa) |
+| Solo desarrollo y CI | Node (scripts de build sin paquetes, como `build-rptlib.mjs`); runner de tests JS (`node:test`, o Vitest + jsdom si hace falta DOM); xUnit y bUnit; Playwright para e2e | — |
+| Opcional, decisión aparte | Chromium headless para PDF en servidor (solo si se necesitan envíos programados en PDF, Fase 12) | Por defecto: PDF con la impresión del navegador |
+
+Cualquier dependencia nueva requiere un ADR breve: motivo, alternativa propia descartada y tamaño.
+
+### 2.8 Estilos de las pantallas
+
+- Las pantallas Blazor replican **tal cual** la organización y los estilos del prototipo (`src/styles.css`, estructura de `Designer.jsx`, `ReportEditor.jsx`…).
+- Donde ya existe un control corporativo maquetado para lo mismo (botones, pestañas, diálogos, tablas, formularios…), se usa ese control.
+- Lo que no existe en la librería corporativa se porta desde `styles.css` a CSS aislado de Blazor (`*.razor.css`) o a una hoja con prefijo propio (`rpt-app-`), sin tocar la librería corporativa.
+- Se mantiene una lista de «estilos portados pendientes de revisión» que se resuelve en la Fase 14.
+- Los **informes** (lo que pinta la librería en el iframe) tienen su propio tema (Fase 1); no dependen de la librería corporativa.
+
+### 2.9 Estructura de la solución
 
 ```
 src/
-  Xxx.Reporting.Domain.Shared/        # enums, constantes, localización (es, en…)
-  Xxx.Reporting.Domain/               # entidades, repositorios, servicios de dominio (motor de datos)
-  Xxx.Reporting.Application.Contracts/# DTOs, interfaces de app services, permisos
-  Xxx.Reporting.Application/          # app services
-  Xxx.Reporting.EntityFrameworkCore/  # DbContext, mapeos (columnas JSON), migraciones
-  Xxx.Reporting.HttpApi/              # controladores (si se exponen además de los auto-API)
-  Xxx.Reporting.Blazor/               # páginas y componentes (RCL), wwwroot con el SDK compilado
-client/                               # workspace npm
-  rptlib/                             # Fase 1: fuentes de la librería + build + tests
-  rpt-designer/                       # Fase 5: SDK de editores (isla)
-  shared-fixtures/                    # casos JSON compartidos entre tests JS y xUnit
+  Xxx.Reporting.Core/                  # net10.0, sin dependencias: modelo, catálogo, operaciones, HTML, T-SQL, diff
+  Xxx.Reporting.Domain.Shared/         # enums, constantes, localización
+  Xxx.Reporting.Domain/                # entidades, repositorios, motor de datos (ADO.NET + ScriptDom)
+  Xxx.Reporting.Application.Contracts/ # DTOs, interfaces, permisos
+  Xxx.Reporting.Application/           # app services, exportación Open XML
+  Xxx.Reporting.EntityFrameworkCore/   # DbContext, mapeos, migraciones
+  Xxx.Reporting.HttpApi/               # controladores (render del informe, datos con token)
+  Xxx.Reporting.Blazor/                # RCL: páginas, componentes, wwwroot/js (módulos JS propios)
+  Xxx.HttpApi.Host/wwwroot/lib/rptlib/ # versiones publicadas de la librería (inmutables)
+client/
+  rptlib/                              # fuentes de la librería, scripts de build y tests (sin dependencias en runtime)
+test/
+  Xxx.Reporting.Core.Tests/            # xUnit con los fixtures portados del prototipo
+  fixtures/                            # casos JSON compartidos (definiciones, builder → T-SQL, parámetros…)
 ```
 
-Si el producto ya tiene un módulo de informes, se adapta a sus proyectos existentes; la separación por capas es la estándar de ABP.
+Si el producto ya tiene un módulo de informes, se adapta a sus proyectos.
 
 ---
 
@@ -125,372 +171,386 @@ Si el producto ya tiene un módulo de informes, se adapta a sus proyectos existe
 
 | Prototipo | Producto | Estrategia |
 |---|---|---|
-| `lib-src/rptlib-1.2/`, `public/lib/rptlib/*` | `client/rptlib` → estáticos `/lib/rptlib/<v>/` | **Mover** y profesionalizar el build (Fase 1) |
-| `htmlGenerator.js`, `modelOps.js`, `catalog.js`, `autoLayout.js`, `showMe.js`, `themes.js`, `templates.js`, `diff.js` | `client/rpt-designer/src/core` | **Reutilizar** casi tal cual (quitar dependencias de `store.js` y `import.meta.env`) |
-| `Designer.jsx`, `PropertyPanel.jsx`, `ShowMePanel.jsx`, `SemanticEditor.jsx`, `QueryBuilder.jsx`, `SqlEditor.jsx`, `DataSourcesEditor.jsx`, `HtmlTab.jsx`, `LiveComponent.jsx` | `client/rpt-designer/src/ui` | **Reutilizar** dentro de la isla; sustituir llamadas a `store.js`/`sqlEngine.js` por el adaptador de host |
-| `store.js` (localStorage) | Entidades ABP + app services + EF Core | **Reescribir** en C# (la API de `store.js` sirve de lista de casos de uso) |
-| `sqlEngine.js` (alasql), `reportData.js` | Servicio de dominio `ReportDataEngine` en C# | **Portar**: orden de ejecución, dependencias, ciclos, parámetros, fechas relativas, campos calculados, subinformes |
-| `queryBuilder.js` (`toSql`) | `QueryBuilderSqlGenerator` en C# por dialecto | **Portar** usando `tests/queryBuilder.test.js` como fixtures |
-| `sqlToBuilder.js` | Parser de servidor (p. ej. `Microsoft.SqlServer.TransactSql.ScriptDom` si es SQL Server) | **Portar** con `tests/sqlToBuilder.test.js` como fixtures |
-| `getSchema()` / `getRelations()` | Catálogo de datos: `INFORMATION_SCHEMA` + FKs reales + lista blanca | **Reescribir** |
-| `ReportFrame.jsx`, `ParamsBar.jsx` | Componentes Blazor `ReportViewer`, `ReportParamsBar` + pequeño JS de puente `postMessage` | **Reescribir** en Blazor reutilizando el protocolo de mensajes |
-| `exporters.js` (DOCX/XLSX en cliente) | Igual en cliente (Fases 4–10) y en servidor (Fase 11) | **Reutilizar** y luego **portar** |
-| `ReportList.jsx`, `Wizard.jsx`, `ReportEditor.jsx`, `Viewer.jsx` | Páginas Blazor existentes | **Rediseñar** las páginas existentes con lo aprendido |
-| `tests/*.test.js`, `e2e/*.spec.js` | Vitest en `client/*`, xUnit en .NET, Playwright contra Blazor | **Mantener / portar** |
+| JS/CSS existente del producto (pegado en el HTML) | `client/rptlib` → versión `0.9.0` | **Extraer tal cual** (Fase 1) |
+| `lib-src/rptlib-1.2/`, `public/lib/rptlib/1.2.0/` | `client/rptlib` → versión `1.0.0` unificada | **Mover y unificar** con el código existente (Fase 1) |
+| `htmlGenerator.js`, `modelOps.js`, `catalog.js`, `diff.js`, `autoLayout.js`, `showMe.js`, `themes.js`, `templates.js` | `Reporting.Core` (C#) | **Portar** a C# con sus tests como fixtures (Fase 2) |
+| `queryBuilder.js` (`toSql`, `builderParams`) | `Reporting.Core` → generador T-SQL | **Portar** (Fases 2 y 7) |
+| `sqlEngine.js`: parámetros, fechas relativas, `executionOrder`, `inferFields`, `mergeFields` | `Reporting.Core` (lo puro) + `Domain` (ejecución) | **Portar** (Fases 2 y 4) |
+| `sqlEngine.js`: alasql, `validateSql` | ADO.NET + ScriptDom en servidor | **Reescribir** (Fase 4) |
+| `sqlToBuilder.js` | Servicio de servidor con ScriptDom | **Portar** (Fase 7) |
+| `reportData.js` (`buildFullData`, subinformes) | `Domain` → `ReportDataEngine` | **Portar** (Fase 4) |
+| `getSchema()` / `getRelations()` | Catálogo de datos (`sys.tables`, `sys.columns`, `sys.foreign_keys`) + lista blanca | **Reescribir** (Fase 4) |
+| `store.js` | Entidades ABP + app services + EF Core | **Reescribir** (la API de `store.js` es la lista de casos de uso) (Fase 3) |
+| `Designer.jsx`, `PropertyPanel.jsx`, `ShowMePanel.jsx`, `LiveComponent.jsx` | Componentes Blazor + `rptCanvas.js` + `rptLive.js` | **Reescribir en Blazor** manteniendo estructura y estilos (Fase 6) |
+| `QueryBuilder.jsx`, `SqlEditor.jsx`, `DataSourcesEditor.jsx` | Componentes Blazor + `rptQueryCanvas.js` + `rptSqlEditor.js` | **Reescribir en Blazor** (Fase 7) |
+| `SemanticEditor.jsx` | Componente Blazor | **Reescribir en Blazor** (Fase 11) |
+| `ReportFrame.jsx`, `ParamsBar.jsx`, `Viewer.jsx` | `ReportViewer`, `ReportParamsBar` + `reportBridge.js` | **Reescribir en Blazor** (Fase 5) |
+| `exporters.js` (docx/exceljs en el cliente) | Open XML SDK en servidor a partir de `collect()` | **Portar** la estructura (Fase 5) |
+| `ReportList.jsx`, `Wizard.jsx`, `ReportEditor.jsx`, `HistoryTab.jsx`, `HtmlTab.jsx` | Páginas Blazor existentes | **Rehacer** con la organización del prototipo (Fases 8 y 9) |
+| `src/styles.css` | Controles corporativos + CSS aislado de Blazor | **Replicar** (2.8) y revisar en la Fase 14 |
+| `tests/*.test.js` | xUnit (`Reporting.Core.Tests`, dominio) y tests JS de la librería | **Portar** |
+| `e2e/*.spec.js` | Playwright contra la aplicación Blazor | **Portar** |
 
 ---
 
 ## 4. Fases
 
-Cada fase indica: objetivo, código del prototipo de referencia, tareas, entregables y criterios de aceptación. Las fases 1–4 ya aportan valor al producto actual (librería separada, motor de datos sólido, mejor visor) **antes** de tener el diseñador.
+Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y criterio de aceptación. Las fases 1–5 ya aportan valor al producto actual (librería enlazada en lugar de pegada, consultas seguras, mejor visor, exportación) **antes** de tener el diseñador.
 
 ---
 
-### Fase 0 · Preparación y contratos
+### Fase 0 · Inventario, contratos y decisiones
 
-**Objetivo:** fijar decisiones y contratos para que el resto de fases puedan avanzar en paralelo.
+**Objetivo:** conocer lo que ya hay y fijar los contratos para que el resto de fases puedan avanzar en paralelo.
 
-**Referencia en el prototipo:** `docs/ANALISIS.md`, `src/lib/htmlGenerator.js`, `src/lib/catalog.js`, `src/lib/store.js` (forma de `report` y de `snapshot`), `src/lib/reportData.js` (forma de `RPT_DATA`).
+**Referencia en el prototipo:** `docs/ANALISIS.md`, `src/lib/htmlGenerator.js`, `src/lib/catalog.js`, `src/lib/store.js` (forma de `report` y de la instantánea de versión), `src/lib/reportData.js` (forma de `RPT_DATA`).
 
 **Tareas**
 
-1. Inventario del producto actual: entidad de informe, cómo se guardan HTML y consultas, conexiones a BD, motor/dialecto SQL, permisos existentes, modo de hospedaje Blazor (Server / WebAssembly / Web App), tema visual (LeptonX, Blazorise…), cómo se pinta hoy el dashboard.
-2. Escribir ADR para las decisiones de la §2 (islas JS, ejecución en servidor, librería versionada, aislamiento, dialecto SQL objetivo).
-3. Definir **JSON Schema versionado** (`schemaVersion`) de:
+1. **Inventario del JS/CSS existente** del producto:
+   - Dónde vive el código y cómo lo pega hoy la generación (plantilla, marcadores, concatenación).
+   - Qué componentes y atributos/clases usa el HTML de los informes, qué API JS expone, cómo recibe los datos.
+   - Qué informes existentes lo llevan **sin modificar** y cuáles tienen la copia pegada **editada a mano** (comparar por hash del bloque pegado).
+   - Qué funcionalidades usan de verdad los informes en producción.
+2. **Matriz de compatibilidad** entre el código existente y RptLib 1.2: (a) presente en ambos; (b) solo en el existente; (c) solo en RptLib. Para (a), anotar si el marcado/API difiere.
+3. Inventario del resto del producto: entidad de informe, cómo se guardan HTML y consultas, conexiones a SQL Server, permisos, cómo se pinta hoy el dashboard, controles disponibles en la librería corporativa (para mapear cada pantalla del prototipo a controles corporativos o a CSS portado).
+4. ADR de las decisiones de la §2 (diseñador en Blazor con módulos JS mínimos, núcleo compartido, ejecución en servidor, librería versionada, aislamiento, política de dependencias, estilos).
+5. **JSON Schema versionado** (`schemaVersion`) de:
    - `ReportDefinition`: `model` (páginas, filas, celdas, tema, `paper`, `reportFilters`, `libVersion`), `dataSources[]` (id, nombre, `mode: sql|visual`, `sql`, `builder`, `fields[]`, `calculated[]`, conexión), `params[]`, `semantic`.
    - `RPT_DATA`: `{ sources: { id: { fields, rows } }, params, semantic, subreports, generatedAt }`.
-   - Protocolo `postMessage` host ↔ informe (los mensajes existentes en `70-report.js` y `ReportFrame.jsx`).
-4. Crear `client/shared-fixtures/` con ejemplos de definiciones (exportar las plantillas de `templates.js`: *Ventas*, *Equipo comercial*, *Inventario*) que usarán los tests de JS y de .NET.
-5. Definir permisos ABP (borrador):
+   - Protocolo `postMessage` host ↔ informe (los mensajes de `70-report.js` y `ReportFrame.jsx`).
+6. Crear `test/fixtures/` con: las plantillas de `templates.js` (*Ventas*, *Equipo comercial*, *Inventario*) exportadas como JSON (`libVersion` → `1.0.0`), casos de `tests/*.test.js` convertidos a JSON (entrada → salida esperada) y `src/data/sampledb.json` como datos de prueba.
+7. Permisos ABP (borrador):
    - `Reporting.Reports` (ver), `.Create`, `.Edit`, `.Delete`, `.Publish`, `.ManageHistory`
-   - `Reporting.Reports.EditSql` (escribir SQL libre; separado del editor visual)
-   - `Reporting.DataCatalog.Manage` (conexiones, tablas expuestas)
+   - `Reporting.Reports.EditSql` (SQL libre; separado del editor visual)
+   - `Reporting.DataCatalog.Manage` (conexiones y tablas expuestas)
    - `Reporting.Dashboard` (personalizar el propio)
-6. Preparar el workspace `client/` (npm workspaces, Node LTS) y su integración en el pipeline de CI del producto.
 
-**Entregables:** ADRs, JSON Schemas, fixtures, lista de permisos, CI con el workspace `client/` vacío compilando.
+**Entregables:** inventario y matriz de compatibilidad, mapa pantalla → controles corporativos, ADR, JSON Schemas, fixtures, permisos.
 
-**Aceptación:** las plantillas del prototipo validan contra los JSON Schemas; el equipo ha aprobado los ADR.
-
----
-
-### Fase 1 · RptLib como librería CSS/JS independiente
-
-**Objetivo:** que la librería de componentes exista como recurso propio, versionado, probado y servido por URL desde el producto; utilizable ya por los informes HTML actuales.
-
-**Referencia en el prototipo:** `lib-src/rptlib-1.2/*.js` (fuentes por módulos), `public/lib/rptlib/1.2.0/rptlib.css`, `public/lib/rptlib/1.2.0/maps/es.js`, `scripts/build-rptlib.mjs`, `scripts/build-maps.mjs`, `tests/rptlib.test.js`, README del prototipo (sección *Librería RptLib*: atributos, props y API).
-
-**Tareas**
-
-1. Mover las fuentes a `client/rptlib/src/` manteniendo los módulos (`00-core` … `70-report`) y el CSS.
-2. Build profesional (esbuild o Rollup) que genere, por versión:
-   - `rptlib.js` (IIFE sin dependencias, como hoy), `rptlib.min.js`, `rptlib.css`, `rptlib.min.css`, *source maps*.
-   - `maps/es.js` (carga bajo demanda, ruta relativa a la del script, como `BASE` en `00-core.js`).
-   - Hashes **SRI** (`integrity`) y un `manifest.json` (versión, ficheros, hashes, changelog).
-   - Mantener el escape a ASCII (`\uXXXX`) que hace `build-rptlib.mjs` para no depender del *charset* del servidor.
-3. **Versionado semántico** y política de inmutabilidad: una versión publicada no se modifica nunca; correcciones = nueva versión de parche. Script `release` que copia la salida a `.../wwwroot/lib/rptlib/<versión>/` y falla si la carpeta ya existe.
-4. Publicación desde el producto: middleware/StaticFiles en el Host ABP para `/lib/rptlib/**` con `Cache-Control: immutable`, `Content-Type` correcto y CORS si se usa otro dominio/CDN. Opcional: publicar también en un CDN.
-5. **Internacionalización** de la librería: extraer los textos fijos (menú «Ver datos», «Exportar CSV», narrativa, «Página X de Y»…) a un diccionario por idioma seleccionado con `<html lang>`; `es-ES` por defecto y `en` como segundo idioma.
-6. **Alinear tokens visuales** (Fluent) con el tema del producto: variables CSS `--rpt-brand`, `--rpt-bg`, fuentes, radios; documentar cómo el host fija la marca del inquilino (ABP multi-tenant) sin tocar la librería.
-7. Tests:
-   - Unitarios (Vitest + jsdom): portar `tests/rptlib.test.js` y añadir uno por componente (render con fixtures).
-   - **Regresión visual** (Playwright, capturas por componente y tema claro/oscuro) para detectar cambios entre versiones.
-8. Documentación de la librería (`client/rptlib/README.md`): atributos `data-rpt`, props por componente, modelo semántico en el HTML, API JS, protocolo `postMessage`, tabla de compatibilidad por versión.
-9. **Adopción en el producto actual**: en el flujo existente de «subir HTML», ofrecer una plantilla HTML base que enlace la librería (ver `MANUAL_SAMPLE_HTML` en `templates.js`) y un aviso si el HTML no la referencia (como hace `HtmlTab.jsx`). Los informes antiguos con CSS/JS embebido siguen funcionando sin cambios.
-
-**Entregables:** paquete `client/rptlib`, versión `1.2.x` (o `2.0.0` si se rompen contratos) servida desde el producto, documentación, tests unitarios y visuales en CI.
-
-**Aceptación:** un HTML manual que enlaza `/lib/rptlib/<v>/rptlib.css|js` con `RPT_DATA` inyectado se pinta igual que en el prototipo; las cabeceras de caché son `immutable`; publicar dos veces la misma versión falla.
+**Aceptación:** las plantillas del prototipo validan contra los JSON Schemas; se sabe qué informes existentes llevan el código pegado sin modificar.
 
 ---
 
-### Fase 2 · Modelo de dominio y API del informe (ABP)
+### Fase 1 · Librería de informes separada (CSS/JS)
 
-**Objetivo:** persistir la definición completa del informe, su historial inmutable y su estado de publicación, sustituyendo lo que hace `store.js`.
+**Objetivo:** que el código de informes deje de pegarse en el HTML: una librería propia, versionada, probada y servida por URL, primero con el código actual sin cambios y después unificada con RptLib.
 
-**Referencia en el prototipo:** `src/lib/store.js` (casos de uso: crear, guardar con nota, versiones, restaurar total o parcial, publicar/despublicar, etiquetar, duplicar, exportar/importar, bloques reutilizables, marcadores), `src/lib/diff.js`, `src/lib/modelOps.js` (`validateModel`).
+**Referencia en el prototipo:** `lib-src/rptlib-1.2/*.js`, `public/lib/rptlib/1.2.0/rptlib.css`, `public/lib/rptlib/1.2.0/maps/es.js` (ya generado; no hace falta volver a ejecutar `build-maps.mjs`), `scripts/build-rptlib.mjs`, `tests/rptlib.test.js`, README del prototipo (sección *Librería RptLib*), `src/components/HtmlTab.jsx` (avisos de librería no referenciada).
 
-**Tareas**
+**1A · Extraer el código existente tal cual (versión `0.9.0`)**
 
-1. Ampliar la entidad existente de informe (agregado raíz `Report`, `FullAuditedAggregateRoot<Guid>`, `IMultiTenant`):
-   - `Name`, `Description`, `Folder/Category`, `Mode` (`Manual` | `Designer`), `Status` (borrador/publicado), `LibVersion`.
-   - Borrador actual: `Html` (solo en modo manual), `Model` (JSON), `DataSources` (JSON o entidad hija), `Params` (JSON), `Semantic` (JSON), `SchemaVersion`.
-   - `PublishedVersionId`.
-   - Columnas JSON en EF Core (`OwnsOne(...).ToJson()` o `nvarchar(max)` con conversor), según el proveedor de BD.
-2. Entidad `ReportVersion` (inmutable): `Number`, `Note`, `Label`, `CreatedBy/At`, instantánea completa (`Mode`, `Html`, `Model`, `DataSources`, `Params`, `Semantic`, `LibVersion`). *Restaurar* crea una versión nueva (no reescribe el pasado), con restauración parcial por partes (`design`, `data`, `params`) como `restoreVersion()`.
-3. Entidades auxiliares: `ReportBlock` (bloques reutilizables por usuario o compartidos), `ReportBookmark` (vistas guardadas: estado de filtros, nivel de profundización, página, parámetros; privadas o compartidas).
-4. **Migración de datos** de los informes existentes: HTML subido → `Mode = Manual`; consultas actuales → `DataSources` con `mode: sql`; se crea la versión 1 con la nota «Migrado».
-5. *Application Services* (`IReportAppService`, `IReportVersionAppService`, …): CRUD, `SaveAsync(id, definition, note)` (crea versión), `GetVersionsAsync`, `GetVersionAsync`, `RestoreAsync(id, versionId, parts)`, `PublishAsync(id, versionId)`, `UnpublishAsync`, `SetVersionLabelAsync`, `DuplicateAsync`, `ExportAsync(withHistory)` / `ImportAsync` (formato JSON compatible con el del prototipo).
-6. **Validación en servidor** antes de guardar: JSON Schema; vínculos rotos (orígenes o campos inexistentes, medidas/jerarquías inexistentes: portar `validateModel()`); en modo `Designer` el HTML se **regenera en servidor** o se valida que el enviado corresponde al modelo (recomendado: el cliente envía el modelo y el servidor genera el HTML con un generador portado o con el mismo `htmlGenerator.js` ejecutado en un paso controlado; elegir en la Fase 0).
-7. **Permisos**: comprobación por informe (los permisos existentes del listado) en todos los servicios; `EditSql` requerido para guardar orígenes en modo SQL o cambiar su SQL.
-8. Concurrencia optimista (`ConcurrencyStamp` de ABP): si dos personas editan el mismo informe, el segundo guardado recibe conflicto y se le ofrece comparar.
-9. Límite de versiones retenidas configurable (el prototipo usa 50) mediante *Settings* de ABP, sin borrar nunca la versión publicada ni las etiquetadas.
-10. Tests xUnit de dominio y de aplicación (ABP test base) con los fixtures de la Fase 0.
+1. Llevar el JS/CSS que hoy se pega a `client/rptlib/legacy/` **sin cambios funcionales** y publicarlo como `/lib/rptlib/0.9.0/rptlib.{css,js}`.
+2. Servir `/lib/rptlib/**` desde el Host con `UseStaticFiles` y cabeceras `Cache-Control: immutable`, `Content-Type` con `charset=utf-8` y `X-Content-Type-Options: nosniff`.
+3. Cambiar la generación del informe: en lugar de pegar el código, añadir `<link rel="stylesheet" href="/lib/rptlib/0.9.0/rptlib.css">` y `<script src="/lib/rptlib/0.9.0/rptlib.js" defer></script>`.
+4. **Migración de informes existentes** (migración de datos o tarea de ABP):
+   - Si el bloque pegado coincide (hash) con el código de `0.9.0`, se sustituye por los enlaces.
+   - Si se editó a mano, se deja como está y se marca «Revisar» en el listado (se resuelve a mano).
+   - Se crea una versión con la nota «Librería enlazada» (cuando exista el historial; si la migración va antes de la Fase 3, se guarda copia del HTML original).
+5. Comprobación: capturas Playwright de una muestra de informes antes y después de migrar; deben ser idénticas.
 
-**Entregables:** entidades, migraciones EF Core, app services, permisos, migración de informes existentes.
+**1B · Librería unificada (versión `1.0.0`)**
 
-**Aceptación:** los casos de uso de `store.js` existen en la API; los informes existentes siguen viéndose; las versiones no se pueden modificar; restaurar crea una versión nueva.
+1. Fuentes en `client/rptlib/src/` con los módulos de RptLib 1.2 (`00-core` … `70-report`) más lo que solo tiene el código existente (casos (b) de la matriz), portado a esos módulos.
+2. Si el marcado de los informes existentes difiere del de RptLib (casos (a) con diferencias), añadir un módulo `05-compat.js` que traduzca el marcado antiguo, para que un informe pueda pasar de `0.9.0` a `1.0.0` sin reescribirse. Si no compensa, documentarlo y dejar esos informes en `0.9.0`.
+3. Build con un script de Node **sin paquetes**, como `build-rptlib.mjs`: concatena módulos, escapa lo no ASCII (`\uXXXX`), genera `rptlib.js` y `rptlib.css`, calcula hashes **SRI** (`crypto` de Node) y escribe un `manifest.json` (versión, ficheros, hashes, cambios). Minificar solo si compensa; si se hace, que sea con una herramienta de desarrollo, nunca en runtime.
+4. El script `release` copia la salida a `Xxx.HttpApi.Host/wwwroot/lib/rptlib/<versión>/` y **falla si la carpeta ya existe**: una versión publicada no se modifica; una corrección es una versión de parche.
+5. Incluir `maps/es.js` (carga bajo demanda, ruta relativa al script como `BASE` en `00-core.js`).
+6. **Internacionalización**: sacar los textos fijos (menú «Ver datos», «Exportar CSV», narrativa, «Página X de Y»…) a un diccionario por idioma, elegido con `<html lang>`; `es-ES` por defecto.
+7. **Tema de los informes**: mantener el de RptLib (variables `--rpt-brand`, `--rpt-bg`, paletas, densidad, claro/oscuro) y documentar cómo fija el host la marca del inquilino.
+8. Tests: unitarios (portar `tests/rptlib.test.js` y uno por componente con los fixtures) y regresión visual con Playwright por componente y tema.
+9. Documentación `client/rptlib/README.md`: atributos `data-rpt`, props por componente, modelo semántico en el HTML, API JS, protocolo `postMessage`, cambios entre `0.9.0` y `1.0.0`.
+
+**Entregables:** `0.9.0` publicada y todos los informes posibles migrados a enlaces; `1.0.0` unificada, documentada y con tests; cambio en la generación para no volver a pegar código.
+
+**Aceptación:** ningún informe nuevo lleva el código pegado; los migrados se ven igual; publicar dos veces la misma versión falla; las plantillas del prototipo se pintan con `1.0.0` igual que con RptLib 1.2.
 
 ---
 
-### Fase 3 · Motor de datos en servidor
+### Fase 2 · Núcleo C# compartido (`Reporting.Core`)
 
-**Objetivo:** ejecutar los orígenes de datos de forma segura y producir `RPT_DATA`, sustituyendo `sqlEngine.js` (alasql) y `reportData.js`.
+**Objetivo:** portar a C# la lógica pura del prototipo para usarla en el servidor y en el cliente WASM, con los tests del prototipo como especificación.
 
-**Referencia en el prototipo:** `src/lib/sqlEngine.js` (`validateSql`, `sqlParams`, `sqlDependencies`, `executionOrder`, `resolveParams`, `resolveRelativeDate`, `presetRange`, `defaultParamValue`, `paramOptions`, `applyCalculated`, `inferFields`, `mergeFields`, `buildReportData`, `runDataSource`), `src/lib/reportData.js` (`buildFullData`: subinformes, prefijos y herencia de parámetros), `tests/core.test.js`, `tests/features.test.js`.
+**Referencia en el prototipo:** `src/lib/catalog.js`, `modelOps.js`, `htmlGenerator.js`, `diff.js`, `autoLayout.js`, `showMe.js`, `themes.js`, `templates.js`, `queryBuilder.js`, las funciones puras de `sqlEngine.js` (`resolveParams`, `resolveRelativeDate`, `presetRange`, `defaultParamValue`, `sqlParams`, `sqlDependencies`, `executionOrder`, `inferFields`, `mergeFields`, `humanize`), `tests/core.test.js`, `features.test.js`, `queryBuilder.test.js`.
 
 **Tareas**
 
-1. **Catálogo de datos** (administración): conexiones (cadena cifrada, proveedor, usuario de solo lectura), esquemas/tablas/vistas **expuestos** (lista blanca), etiquetas amigables, relaciones reales (FKs de `INFORMATION_SCHEMA`) más relaciones manuales. Sustituye a `getSchema()`/`getRelations()`. Endpoint `GetSchemaAsync(connectionId)` filtrado por permisos para el editor.
-2. **Validación de SQL** con parser real del dialecto (p. ej. `ScriptDom` para SQL Server): una sola sentencia `SELECT`; prohibidos DDL/DML, `EXEC`, `INTO`, `OPENROWSET`, servidores enlazados, comentarios con sentencias, etc.; solo tablas del catálogo expuesto. Nunca con expresiones regulares.
-3. **Parámetros**: nombrados (`:p` en el prototipo → `@p` en el dialecto), siempre como `DbParameter` tipado, nunca concatenados; tipos `text`, `number`, `date` (fija o relativa: hoy, inicio de mes/año…), `list` (estática o desde consulta) y `daterange` (`:p_desde`/`:p_hasta`); parámetros opcionales (`(@p IS NULL OR …)`). Validar los valores recibidos contra su definición.
-4. **Orígenes derivados** (`FROM origen.<id>`): resolver orden y ciclos como `executionOrder()`. Recomendado: componer como CTE cuando comparten conexión; si no, ejecutar en memoria con límite de filas.
-5. **Campos calculados**: traducir la expresión a SQL (`SELECT q.*, <expr> AS <nombre> FROM (<consulta>) q`) validándola con el parser (solo funciones permitidas), o evaluarla en servidor sobre las filas. Mantener los mensajes de error del prototipo.
-6. **Límites y protección**: timeout por consulta, máximo de filas (el prototipo usa 10.000) y de tamaño de respuesta, concurrencia por usuario, cancelación (`CancellationToken`).
-7. **Inferencia y fusión de campos** (`inferFields`/`mergeFields`) a partir del esquema del `DataReader`: el usuario conserva etiquetas, tipos y formatos editados.
+1. Proyecto `Xxx.Reporting.Core` (`net10.0`, sin `PackageReference`), compatible con WASM (sin E/S, sin reflexión que impida el *trimming*; serialización con `System.Text.Json` y *source generators*).
+2. **Tipos** (`record`) de `ReportDefinition`, `ReportModel`, `Page`, `Row`, `Cell`, `Theme`, `Paper`, `DataSource`, `QueryBuilderModel`, `ParamDef`, `SemanticModel`, `RptData`, conformes al JSON Schema de la Fase 0. Las props de cada celda como `JsonObject` (el catálogo define su forma).
+3. **Catálogo** (`catalog.js`): tipos de componente, grupos, iconos, valores por defecto, `span`, esquema de propiedades (`text`, `select`, `field`, `fields`, `bool`, `when`…), agregaciones, formatos. Es lo que usa Blazor para generar el panel de propiedades.
+4. **Operaciones sobre el modelo** (`modelOps.js`): insertar, mover, mover con teclado, actualizar, duplicar, borrar (simples y múltiples), alinear en fila, pegar, filas, páginas, `renameSource`, `renameSourceInSemantic`, `sourceUsage`, `validateModel`. Inmutables (devuelven un modelo nuevo) para que deshacer/rehacer sea una pila de modelos.
+5. **Generador de HTML** (`htmlGenerator.js`): `GenerateHtml` (mismos escapes, `data-props` con comillas simples, `rpt-model` y `rpt-semantic` embebidos, `paperCss`, atributos de tema, enlaces a `libVersion`), `ParseModelFromHtml` y `SourcesUsedInHtml` (análisis sencillo y acotado a `rpt-model` y `data-source`; sin analizador HTML de terceros).
+6. **Generador T-SQL del editor visual** (`queryBuilder.js` → `TSqlBuilder`): `[tabla].[columna]`, alias, uniones `INNER`/`LEFT`, funciones de fecha (año → `YEAR()`, mes → `MONTH()`, año-mes → `FORMAT(x,'yyyy-MM')` o `CONVERT(char(7), x, 126)`, trimestre → `DATEPART(QUARTER, x)`), agregaciones, `GROUP BY` automático, filtros por valor y por parámetro (`@p`, opcionales con `(@p IS NULL OR …)`), `DISTINCT`, `ORDER BY`, límite con `TOP (n)`.
+7. **Parámetros**: definiciones, valores por defecto, fechas relativas, periodos predefinidos, `daterange` (`@p_desde`/`@p_hasta`), detección de parámetros y de dependencias `origen.<id>` en un SQL, orden de ejecución con ciclos.
+8. **Comparación de versiones** (`diff.js`): diferencias de componentes, SQL línea a línea, parámetros y tema.
+9. **Diseño automático, Show Me, temas JSON (compatibles con Power BI) y plantillas** (`autoLayout.js`, `showMe.js`, `themes.js`, `templates.js`).
+10. Tests xUnit (`Reporting.Core.Tests`) con los fixtures de `test/fixtures/`. Para el HTML, comparar con el que genera el prototipo para las plantillas (normalizando la URL de la librería).
+
+**Entregables:** `Reporting.Core` con tests, referenciado por `Domain` y por el cliente Blazor.
+
+**Aceptación:** todos los casos portados de `tests/core.test.js`, `features.test.js` y `queryBuilder.test.js` pasan; el HTML generado para las plantillas equivale al del prototipo; el ensamblado funciona en WASM.
+
+---
+
+### Fase 3 · Modelo de dominio y API del informe (ABP)
+
+**Objetivo:** persistir la definición completa, el historial inmutable y la publicación, sustituyendo `store.js`.
+
+**Referencia en el prototipo:** `src/lib/store.js` (crear, guardar con nota, versiones, restaurar total o parcial, publicar/despublicar, etiquetar, duplicar, exportar/importar, bloques reutilizables, marcadores), `src/lib/diff.js`, `src/lib/modelOps.js` (`validateModel`).
+
+**Tareas**
+
+1. Ampliar la entidad de informe existente (agregado `Report`, `FullAuditedAggregateRoot<Guid>`, `IMultiTenant` si aplica): `Name`, `Description`, `Folder`, `Mode` (`Manual` | `Designer`), `Status`, `LibVersion`, `NeedsReview` (de la migración de la Fase 1); borrador: `Html` (solo modo manual), `Definition` (JSON: modelo, orígenes, parámetros, semántica), `SchemaVersion`; `PublishedVersionId`. JSON en columnas `nvarchar(max)` (con `ISJSON` si se quiere) o mapeo JSON de EF Core.
+2. `ReportVersion` (inmutable): `Number`, `Note`, `Label`, `CreatorId`, `CreationTime`, instantánea (`Mode`, `Html`, `Definition`, `LibVersion`). *Restaurar* crea una versión nueva, también parcial por partes (`design`, `data`, `params`), como `restoreVersion()`.
+3. `ReportBlock` (bloques reutilizables, del usuario o compartidos) y `ReportBookmark` (vistas guardadas: filtros, nivel de profundización, página, parámetros; privadas o compartidas).
+4. **Migración** de los informes existentes: HTML → `Mode = Manual`; consultas actuales → orígenes `mode: sql`; versión 1 «Migrado».
+5. *Application services*: CRUD, `SaveAsync(id, definition, note)` (crea versión), `GetVersionsAsync`, `GetVersionAsync`, `RestoreAsync(id, versionId, parts)`, `PublishAsync`, `UnpublishAsync`, `SetVersionLabelAsync`, `DuplicateAsync`, `ExportAsync(withHistory)` / `ImportAsync` (JSON compatible con el del prototipo).
+6. **Validación en servidor** al guardar: JSON Schema (validador propio sencillo sobre los tipos de `Reporting.Core`, sin paquete externo), `validateModel` de `Reporting.Core`, y en modo `Designer` el **HTML se regenera en servidor** con `GenerateHtml` (se ignora el que mande el cliente).
+7. Permisos por informe (los que ya filtran el listado) en todos los servicios; `EditSql` para crear o cambiar SQL libre.
+8. Concurrencia optimista con `ConcurrencyStamp`: el segundo guardado recibe conflicto y se le ofrece comparar.
+9. Retención de versiones configurable con *Settings* de ABP (el prototipo usa 50), sin borrar nunca la publicada ni las etiquetadas.
+10. Tests xUnit de dominio y aplicación (base de tests de ABP).
+
+**Aceptación:** los casos de uso de `store.js` existen en la API; los informes existentes se siguen viendo; las versiones no se pueden modificar; restaurar crea una versión nueva.
+
+---
+
+### Fase 4 · Motor de datos en SQL Server
+
+**Objetivo:** ejecutar los orígenes de forma segura y producir `RPT_DATA`, sustituyendo alasql.
+
+**Referencia en el prototipo:** `src/lib/sqlEngine.js` (`validateSql`, `applyCalculated`, `runQuery`, `buildReportData`, `runDataSource`), `src/lib/reportData.js` (`buildFullData`), `tests/core.test.js`, `features.test.js`.
+
+**Tareas**
+
+1. **Catálogo de datos** (administración): conexiones (cadena cifrada, usuario de solo lectura), esquemas/tablas/vistas **expuestos** (lista blanca), etiquetas amigables, relaciones leídas de `sys.foreign_keys` más relaciones manuales. Sustituye a `getSchema()`/`getRelations()`. `GetSchemaAsync(connectionId)` filtrado por permisos para el editor.
+2. **Validación** con `Microsoft.SqlServer.TransactSql.ScriptDom` (un `TSqlFragmentVisitor`): una sola sentencia; solo `SELECT` (con CTE permitidas); prohibido `INSERT/UPDATE/DELETE/MERGE`, DDL, `EXEC`, `SELECT INTO`, `OPENROWSET`/`OPENQUERY`/`OPENDATASOURCE`, nombres de 3–4 partes hacia otras BD o servidores vinculados, variables de tabla, `WAITFOR`; solo objetos del catálogo expuesto. Nunca con expresiones regulares.
+3. **Parámetros**: el editor usa `@nombre` (en el prototipo `:nombre`; la migración de definiciones del prototipo lo convierte). Siempre `SqlParameter` con `SqlDbType` según la definición; valores validados contra su tipo. Listas (`IN`) con un parámetro por valor o `STRING_SPLIT`/tabla de valores.
+4. **Orígenes derivados** (`FROM origen.<id>`): al ejecutar, se componen como **CTE** (`WITH [id] AS (…)`) en el orden de `executionOrder` de `Reporting.Core`. Si un origen usa otra conexión, se rechaza (o se ejecuta en memoria con límite, si se decide en la Fase 0).
+5. **Campos calculados**: se traducen a SQL envolviendo la consulta (`SELECT q.*, <expr> AS [nombre] FROM (<consulta>) q`), validando la expresión con ScriptDom (solo operadores, `CASE`, funciones de una lista blanca). Mismos mensajes de error que el prototipo.
+6. **Ejecución** con ADO.NET (`SqlConnection`, `SqlCommand`, `SqlDataReader`): `CommandTimeout`, máximo de filas (el prototipo usa 10.000; con `TOP` exterior o cortando la lectura), tamaño máximo de respuesta, `CancellationToken`, `ApplicationIntent=ReadOnly` si hay réplica de lectura.
+7. **Campos**: tipos a partir del esquema del `SqlDataReader` y fusión con los editados por el usuario (`mergeFields` de `Reporting.Core`).
 8. **Subinformes**: portar `buildFullData()` (prefijos `subN_`, herencia de parámetros homónimos, renombrado de medidas/jerarquías, protección contra ciclos) comprobando permisos sobre el informe enlazado.
 9. Endpoints:
-   - `POST /api/app/report-data/{reportId}` → `RPT_DATA` de la versión publicada (o del borrador si se tiene `Edit`), con valores de parámetros.
-   - `POST /api/app/report-data/preview` → ejecuta una definición sin guardar (editor; requiere `Edit`, y `EditSql` si contiene SQL libre).
-   - `POST /api/app/report-data/preview-source` → un único origen con sus dependencias (`runDataSource`), con tiempo de ejecución.
-   - `GET /reports/{id}/render?v=...` → HTML del informe con `RPT_DATA` inyectado (ver 2.5), con cabeceras CSP.
-10. **Caché** opcional por (versión, parámetros, usuario/inquilino) con caducidad configurable; invalidación al publicar.
-11. **Auditoría**: registrar quién ejecuta qué origen, con qué parámetros y cuánto tarda (auditoría de ABP + log estructurado).
-12. Seguridad por filas (preparación): punto de extensión `IReportDataFilterProvider` para inyectar filtros por usuario/inquilino (se completa en la Fase 12).
-13. Tests: portar los casos de `tests/core.test.js` y `features.test.js` relativos a parámetros, fechas relativas, dependencias, ciclos y campos calculados; tests de integración con una BD de pruebas (Testcontainers) cargada con `src/data/sampledb.json` para comparar resultados con el prototipo.
+   - `POST /api/app/report-data/{reportId}` → `RPT_DATA` de la versión publicada (o del borrador con `Edit`) con valores de parámetros.
+   - `POST /api/app/report-data/preview` → definición sin guardar (requiere `Edit`, y `EditSql` si hay SQL libre).
+   - `POST /api/app/report-data/preview-source` → un origen con sus dependencias y tiempo de ejecución (`runDataSource`).
+   - `POST /api/app/report-render/{reportId}` → devuelve un **token firmado de un solo uso**; `GET /reports/render/{token}` → HTML con `RPT_DATA` inyectado y cabeceras CSP (ver 2.6). Así el iframe sandbox no necesita el token de la app.
+10. Caché opcional en memoria/distribuida de ABP por (versión, parámetros, usuario/inquilino), invalidada al publicar.
+11. **Auditoría**: quién ejecuta qué origen, con qué parámetros y cuánto tarda (auditoría de ABP + log estructurado).
+12. Punto de extensión de seguridad por filas `IReportDataFilterProvider` (se completa en la Fase 13).
+13. Tests: unitarios de validación (consultas permitidas y prohibidas) e integración contra una **SQL Server de pruebas** (la instancia de CI que ya use el producto o LocalDB) cargada con `src/data/sampledb.json`, comparando resultados con los del prototipo.
 
-**Entregables:** catálogo de datos, motor de ejecución, endpoints de datos y de renderizado.
-
-**Aceptación:** las plantillas del prototipo, ejecutadas contra la BD de pruebas, producen `RPT_DATA` equivalente al del prototipo; ninguna consulta no-SELECT ni de tablas no expuestas pasa la validación; los parámetros nunca se concatenan.
+**Aceptación:** las plantillas del prototipo, ejecutadas contra la BD de pruebas, producen `RPT_DATA` equivalente; ninguna consulta que no sea `SELECT` o que toque tablas no expuestas pasa la validación; los parámetros nunca se concatenan.
 
 ---
 
-### Fase 4 · Visor de informes en Blazor
+### Fase 5 · Visor de informes y exportación
 
-**Objetivo:** un componente reutilizable para ver informes (listado, editor y dashboard) con parámetros, filtros, marcadores y exportación.
+**Objetivo:** componente Blazor reutilizable para ver informes (listado, editor y dashboard) con parámetros, filtros, marcadores y exportación sin dependencias en el cliente.
 
-**Referencia en el prototipo:** `src/components/ReportFrame.jsx` (iframe sandbox, dispositivos, estado, marcadores, exportaciones), `src/components/ParamsBar.jsx`, `src/pages/Viewer.jsx`, `src/lib/exporters.js`, `lib-src/rptlib-1.2/70-report.js` (mensajes `rpt:*`), `e2e/app.spec.js`, `e2e/v3.spec.js`.
+**Referencia en el prototipo:** `src/components/ReportFrame.jsx`, `ParamsBar.jsx`, `src/pages/Viewer.jsx`, `src/lib/exporters.js` (estructura de Word y Excel), `lib-src/rptlib-1.2/70-report.js` (mensajes `rpt:*` y `collect()`), `e2e/app.spec.js`, `e2e/v3.spec.js`.
 
 **Tareas**
 
-1. Componente `ReportViewer` (Blazor) con parámetros `ReportId`, `VersionId?`, `InitialParams`, `InitialState`, `Height`, `ShowToolbar`, `Compact` (para el dashboard).
-2. `<iframe sandbox="allow-scripts">` apuntando al endpoint `render` (o con `srcdoc` para el borrador en el editor). Sin `allow-same-origin`.
-3. Módulo JS de puente (`reportBridge.js`, módulo ES cargado con `IJSObjectReference`): reenvía `rpt:ready`, `rpt:state`, `rpt:filters`, `rpt:collected` a .NET con `DotNetObjectReference`; expone `post(message)`. Filtrar `event.source` para aceptar solo mensajes del iframe propio.
-4. `ReportParamsBar` (Blazor): genera los controles desde la definición de parámetros (texto, número, fecha, lista, rango con periodos predefinidos), «Aplicar» recarga los datos.
-5. Barra de herramientas: filtros activos y «Quitar filtros», vista por dispositivo (escritorio/tablet/móvil), imprimir/PDF (`rpt:print`), exportar **Word/Excel** (de momento en cliente: `rpt:collect` + `exporters.js` empaquetado como módulo JS), pantalla completa.
-6. **Marcadores/vistas guardadas** sobre la entidad `ReportBookmark`: guardar estado (`rpt:state`), aplicar (`rpt:setState`), compartir por enlace (`encodeView`/`decodeView`, o mejor un id de marcador en la URL).
-7. Estados de carga, error por origen (los `errors` de `buildReportData`) y vacío; localización con ABP.
-8. Usar el visor en la página de **listado** (vista del informe) y en el **dashboard** actual (sustituyendo el pintado actual) para validar el componente con usuarios reales.
-9. Tests bUnit del componente y e2e Playwright (portar los escenarios de lectura de `e2e/app.spec.js`: filtros, filtro cruzado, ver datos, exportar CSV).
+1. `ReportViewer` (Blazor) con `ReportId`, `VersionId?`, `InitialParams`, `InitialState`, `Height`, `ShowToolbar`, `Compact` (dashboard). Organización de la barra igual que `ReportFrame.jsx`, con controles corporativos donde existan.
+2. `<iframe sandbox="allow-scripts">` con la URL de un solo uso (Fase 4) o `srcdoc` para el borrador del editor (HTML de `Reporting.Core` + datos de `preview`).
+3. `reportBridge.js` (módulo ES propio): escucha `message`, acepta solo `event.source === iframe.contentWindow`, reenvía `rpt:ready`, `rpt:state`, `rpt:filters`, `rpt:collected` a .NET (`DotNetObjectReference`) y expone `post(message)`.
+4. `ReportParamsBar`: controles generados desde la definición (texto, número, fecha, lista, rango con periodos predefinidos); «Aplicar» recarga.
+5. Barra: filtros activos y «Quitar filtros», vista por dispositivo (escritorio/tablet/móvil), imprimir/PDF (`rpt:print`, impresión del navegador con `@page`), pantalla completa.
+6. **Exportación Word/Excel en servidor**: el visor pide `rpt:collect` (contenido real: filtros aplicados, imágenes de gráficos, valores de tablas y grupos) y lo envía a `POST /api/app/report-export/{docx|xlsx}`; el servidor genera el fichero con **Open XML SDK** portando la estructura de `buildDocx`/`buildXlsx` (encabezado/pie, numeración, KPI, gráficos como imagen, tablas con cabecera repetida; hoja de resumen, formatos numéricos, esquema por grupos, totales, autofiltro, cabecera fija). `download.js` descarga el resultado. CSV ya lo hace la librería.
+7. **Marcadores** sobre `ReportBookmark`: guardar (`rpt:state`), aplicar (`rpt:setState`), compartir por enlace con el id del marcador.
+8. Estados de carga, error por origen y vacío; textos localizados con ABP.
+9. Usar el visor en el **listado** y en el **dashboard actual** desde ya, para validarlo con usuarios reales.
+10. Tests bUnit y e2e Playwright (escenarios de lectura de `e2e/app.spec.js`: filtros, filtro cruzado, ver datos, exportar).
 
-**Entregables:** `ReportViewer`, `ReportParamsBar`, puente JS, exportación cliente, marcadores.
-
-**Aceptación:** un informe migrado (manual) y una plantilla del prototipo (diseñador) se ven en el listado y en el dashboard con parámetros, filtros, marcadores y exportación; el iframe no puede acceder a la sesión.
+**Aceptación:** un informe migrado (manual) y una plantilla del prototipo se ven en el listado y en el dashboard con parámetros, filtros, marcadores y exportación a PDF/Word/Excel/CSV; el iframe no puede acceder a la sesión; no se añade ninguna librería JS de terceros.
 
 ---
 
-### Fase 5 · SDK del diseñador (isla JS) y su envoltorio Blazor
+### Fase 6 · Diseñador visual del informe (Blazor)
 
-**Objetivo:** convertir los editores del prototipo en un paquete embebible, desacoplado de `localStorage` y de alasql.
+**Objetivo:** el diseñador de arrastrar y soltar en Blazor, con la misma organización y estilos que el prototipo.
 
-**Referencia en el prototipo:** `src/components/Designer.jsx`, `PropertyPanel.jsx`, `LiveComponent.jsx`, `ShowMePanel.jsx`, `Icon.jsx`, `src/lib/modelOps.js`, `catalog.js`, `htmlGenerator.js`, `autoLayout.js`, `showMe.js`, `themes.js`, `templates.js`, `diff.js`, `src/styles.css`, `e2e/app.spec.js` y `e2e/mobile.spec.js` (escenarios de diseño).
+**Referencia en el prototipo:** `src/components/Designer.jsx` (paleta, lienzo, filas, arrastre con puntero, redimensionado, multiselección, atajos, dispositivos, bloques, diseño automático), `PropertyPanel.jsx`, `LiveComponent.jsx`, `ShowMePanel.jsx`, `Icon.jsx`, `src/styles.css`, `e2e/app.spec.js` y `e2e/mobile.spec.js`.
 
 **Tareas**
 
-1. Crear `client/rpt-designer` (Vite en modo librería) con:
-   - `core/`: los módulos de `src/lib` reutilizables (sin cambios funcionales). Sustituir `import.meta.env.BASE_URL` en `libBaseUrl()` por una opción `libBaseUrl` que pasa el host.
-   - `ui/`: los componentes React de los editores.
-   - `index.js`: API pública.
-2. **API pública** (estable y documentada):
-   ```js
-   const handle = RptDesigner.mount(element, {
-     view: 'design' | 'data' | 'semantic' | 'html' | 'compare',
-     definition,            // ReportDefinition (JSON Schema de la Fase 0)
-     host,                  // adaptador (ver abajo)
-     locale, theme, readOnly, libBaseUrl, permissions: { editSql, ... }
-   });
-   handle.getDefinition();  handle.setDefinition(def);  handle.setView(v);
-   handle.validate();       handle.undo(); handle.redo();  handle.destroy();
-   handle.on('change' | 'dirty' | 'validation' | 'selection', fn);
-   ```
-3. **Adaptador de host** (sustituye `store.js` y `sqlEngine.js` en la isla): `getSchema(connectionId)`, `previewSource(ds, params)`, `previewReport(def, params)`, `listBlocks()/saveBlock()/deleteBlock()`, `listReports()` (para subinformes), `clipboard` (copiar/pegar entre informes; puede seguir usando `localStorage` del navegador), `parseSql(sql)` y `builderToSql(builder)` (llaman al servidor, Fase 6), `notify(msg)`.
-4. Implementación del adaptador en el lado Blazor: un módulo JS que hace `fetch` a los app services de ABP (cabeceras de autenticación/antiforgery que ya use el producto) para evitar pasar datos grandes por interop (ver 2.2).
-5. Componente Blazor `ReportDesignerHost` que monta la isla (`OnAfterRenderAsync`), recibe eventos (`dirty`, `validation`) mediante `DotNetObjectReference` y la desmonta en `DisposeAsync`.
-6. **Estilos**: aislar el CSS del prototipo (`styles.css`, prefijo `ui-`) bajo un contenedor raíz (`.rpt-designer`) o Shadow DOM para que no choque con el tema de ABP, y mapear sus colores a los tokens del producto.
-7. Localización: extraer textos de los componentes a recursos (`es`, `en`); el host pasa el idioma de ABP.
-8. Mantener las capacidades del diseñador: paleta, arrastrar/soltar y tocar en móvil, redimensionar en 12 columnas, multiselección, alinear en fila, copiar/pegar, duplicar, deshacer/rehacer, vista por dispositivo, diseño automático, bloques, tema (marca, paleta, densidad, claro/oscuro, logo, temas JSON), avisos de vínculos rotos, Show Me, multipágina.
-9. Tests: Vitest para `core/` (portar `tests/core.test.js` y `features.test.js`), Playwright de la isla sobre una página de pruebas con un adaptador simulado (los escenarios de `e2e/app.spec.js` y `e2e/mobile.spec.js`).
+1. Componentes Blazor con la estructura del prototipo: `DesignerPalette`, `DesignerCanvas` (páginas → filas → celdas), `PropertyPanel`, `ShowMePanel`, `ThemePanel`, `BlocksPanel`. En móvil, paleta/lienzo/propiedades como pestañas, como en el prototipo.
+2. **Estado del editor en C#**: modelo inmutable de `Reporting.Core`, selección (simple y múltiple), pila de deshacer/rehacer, portapapeles (en `localStorage` del navegador para copiar/pegar entre informes, vía interop mínima).
+3. `rptCanvas.js`: arrastrar desde la paleta y entre filas, «tocar para insertar» en móvil, redimensionar por los bordes (ancho en 12 columnas y alto); calcula el destino y llama a .NET con la intención; .NET aplica `moveCell`/`insertCell`/`updateCell` y vuelve a pintar.
+4. `rptLive.js`: carga la librería de la versión del informe en la página de la aplicación y pinta cada celda con `RptLib.renderComponent(el, type, props, source, { interactive: false, … })` y los datos de la vista previa. Es código propio y las props se escapan en la librería; si se prefiere aislar, pintar el lienzo dentro de un iframe del mismo origen.
+5. **Panel de propiedades** generado desde el catálogo de `Reporting.Core` (tipos de control, `when`, campos compatibles según tipo, medidas y jerarquías), con controles corporativos donde existan.
+6. Atajos de teclado (`Supr`, `Ctrl+Z/Y`, `Ctrl+C/V`, `Ctrl+A`, flechas), vista por dispositivo, diseño automático, bloques reutilizables (`ReportBlock`), tema (marca, paleta, densidad, claro/oscuro, logotipo, importar/exportar tema JSON), Show Me, avisos de vínculos rotos, multipágina.
+7. Estilos: replicar `styles.css` en CSS aislado (`*.razor.css`) para lo que no tenga control corporativo; anotar cada caso en la lista de revisión de la Fase 14.
+8. Tests bUnit (panel de propiedades, atajos, deshacer) y e2e Playwright portando los escenarios de diseño de `e2e/app.spec.js` y `e2e/mobile.spec.js`.
 
-**Entregables:** paquete `rpt-designer` compilado en el `wwwroot` del proyecto Blazor, componente `ReportDesignerHost`, documentación de la API.
-
-**Aceptación:** la isla funciona embebida en una página Blazor de pruebas con datos reales de la API; no queda ninguna referencia a `store.js`, `sqlEngine.js` ni alasql en el paquete.
+**Aceptación:** se puede reproducir en Blazor el diseño de las plantillas del prototipo con ratón, teclado y táctil; no hay librerías JS de terceros; la lógica de modelo está en C# y tiene tests.
 
 ---
 
-### Fase 6 · Diseñador de consultas y orígenes de datos
+### Fase 7 · Diseñador de consultas y orígenes de datos
 
-**Objetivo:** editor visual de consultas y editor SQL sobre el esquema real, con la generación y la interpretación de SQL en servidor.
+**Objetivo:** editor visual de consultas y editor SQL sobre el esquema real de SQL Server.
 
-**Referencia en el prototipo:** `src/lib/queryBuilder.js` (`addTable`, uniones automáticas, `toggleColumn`, funciones de fecha, agregaciones, filtros por valor y por parámetro, `toSql`, `builderParams`), `src/lib/sqlToBuilder.js` (interpretación y motivos de `Unsupported`), `src/components/QueryBuilder.jsx`, `SqlEditor.jsx` (CodeMirror con autocompletado), `DataSourcesEditor.jsx` (campos, tipos, formatos, campos calculados, parámetros, renombrar orígenes), `tests/queryBuilder.test.js`, `tests/sqlToBuilder.test.js`.
+**Referencia en el prototipo:** `src/lib/queryBuilder.js`, `src/lib/sqlToBuilder.js` (interpretación y motivos de no soportado), `src/components/QueryBuilder.jsx`, `SqlEditor.jsx`, `DataSourcesEditor.jsx` (campos, tipos, formatos, campos calculados, parámetros, renombrar orígenes), `tests/queryBuilder.test.js`, `tests/sqlToBuilder.test.js`.
 
 **Tareas**
 
-1. **Generación de SQL en servidor** (`QueryBuilderSqlGenerator`, C#): portar `toSql()` al dialecto del producto (comillas de identificadores, `TOP`/`OFFSET…FETCH` vs `LIMIT`, funciones de fecha año/mes/año-mes/trimestre, `DISTINCT`, alias, orden, filtros opcionales). El modelo `builder` se guarda en el origen; el SQL se regenera siempre en servidor al guardar y al ejecutar.
-2. **SQL → visual en servidor**: portar `sqlToBuilder()` sobre el parser del dialecto, devolviendo el mismo `builder` o un motivo de no soportado (expresiones, `CASE`, `OR`, `HAVING`, subconsultas, `RIGHT JOIN`…). Verificación de equivalencia: ejecutar ambas consultas con `TOP n` y comparar, como hace el prototipo.
-3. Fixtures compartidos: convertir `tests/queryBuilder.test.js` y `tests/sqlToBuilder.test.js` en casos JSON (`builder` → SQL esperado por dialecto) usados por xUnit.
-4. En la isla: el lienzo del editor visual usa `host.getSchema()` (tablas expuestas, columnas tipadas, etiquetas, **relaciones reales** para uniones automáticas en lugar de la convención `<tabla>_id`); el SQL de solo lectura que se muestra viene de `host.builderToSql()` (con *debounce*).
-5. CodeMirror con dialecto del producto y autocompletado de tablas/columnas del catálogo y de `origen.<id>`; validación en servidor al escribir (*debounce*) con mensajes del parser.
-6. Gestión de orígenes: crear (visual/SQL), duplicar, renombrar con actualización de componentes y relaciones semánticas (`renameSource`, `renameSourceInSemantic`), selección de conexión, vista previa de resultados con tiempo de ejecución, edición de campos (etiqueta, tipo, formato), campos calculados.
-7. Editor de parámetros: todos los tipos de la Fase 3, valores por defecto, lista desde consulta, periodos predefinidos.
-8. Permisos en la UI: sin `EditSql` solo se ve el editor visual (el SQL generado en lectura); con él, se puede pasar a SQL manual.
+1. **Editor visual** (Blazor + `rptQueryCanvas.js`): arrastrar tablas del catálogo al lienzo, uniones automáticas por las **FK reales** (`sys.foreign_keys`) y uniones manuales con dos clics en los conectores, columnas con función de fecha, agregación, alias y orden, filtros por valor o por parámetro (opcionales «ignorar si vacío»), `DISTINCT` y límite. El T-SQL de solo lectura se genera **en el cliente** con `Reporting.Core` (al momento) y el servidor lo regenera al guardar y al ejecutar.
+2. **T-SQL → visual** en servidor (`POST /api/app/query/parse`): portar `sqlToBuilder()` sobre el árbol de ScriptDom; devuelve el `builder` o el motivo de no soportado (expresiones, `CASE`, `OR`, `HAVING`, subconsultas, `RIGHT JOIN`, orígenes derivados…). Comprobación de equivalencia ejecutando ambas consultas con `TOP (n)` y comparando, como el prototipo.
+3. Fixtures: los casos de `tests/sqlToBuilder.test.js` reescritos en T-SQL para xUnit.
+4. **Editor SQL ligero** (`rptSqlEditor.js` + Blazor): `textarea` con capa de resaltado (palabras clave, cadenas, números, comentarios, `@parámetros`), números de línea, lista de autocompletado de tablas/columnas del catálogo y `origen.<id>` (sugerencias calculadas en C#), y validación en servidor con *debounce* mostrando el error de ScriptDom en su línea. Si con el tiempo se queda corto, valorar CodeMirror con un ADR (2.7).
+5. **Gestión de orígenes**: crear (visual/SQL), duplicar, renombrar actualizando componentes y relaciones semánticas, elegir conexión, vista previa con tiempo de ejecución (`preview-source`), edición de campos (etiqueta, tipo, formato) y campos calculados.
+6. **Editor de parámetros**: todos los tipos de la Fase 4, valores por defecto, lista estática o desde consulta, periodos predefinidos.
+7. Permisos en la UI: sin `EditSql` solo editor visual (el SQL generado se ve en solo lectura); con él, se puede pasar a SQL manual.
 
-**Entregables:** generador e intérprete SQL en servidor, editor de orígenes completo en la isla.
-
-**Aceptación:** todos los casos de los tests del prototipo pasan en xUnit para el dialecto objetivo; un usuario sin `EditSql` puede crear un informe completo solo con el editor visual.
+**Aceptación:** los casos portados de los tests del prototipo pasan en T-SQL; un usuario sin `EditSql` crea un informe completo solo con el editor visual.
 
 ---
 
-### Fase 7 · Pantalla de creación y edición
+### Fase 8 · Pantalla de creación y edición
 
 **Objetivo:** rehacer la página existente de creación/edición con asistente, pestañas y ciclo de vida, conservando la subida de HTML.
 
-**Referencia en el prototipo:** `src/pages/Wizard.jsx` (galería de inicio: en blanco, desde los datos, plantillas, subir HTML; pasos información → orígenes → diseño → revisión), `src/pages/ReportEditor.jsx` (pestañas Vista previa / Diseño / Orígenes / Modelo / HTML / Historial, detección de cambios sin guardar, nota de versión, validación antes de guardar), `src/components/HtmlTab.jsx`, `HistoryTab.jsx`, `src/lib/diff.js`, `src/lib/templates.js`.
+**Referencia en el prototipo:** `src/pages/Wizard.jsx` (galería: en blanco, desde los datos, plantillas, subir HTML; pasos información → orígenes → diseño → revisión), `src/pages/ReportEditor.jsx` (pestañas Vista previa / Diseño / Orígenes / Modelo / HTML / Historial, cambios sin guardar, nota de versión), `src/components/HtmlTab.jsx`, `HistoryTab.jsx`.
 
 **Tareas**
 
-1. **Asistente de creación** (Blazor, pasos con la isla en los pasos 2 y 3):
-   1. Información: nombre, descripción, carpeta, permisos (los del producto).
-   2. Orígenes de datos: isla en vista `data`.
-   3. Diseño: galería de inicio (en blanco, **desde los datos** con `autoLayout`, plantillas, **subir HTML**) y la isla en vista `design`.
-   4. Revisión: `ReportViewer` sobre el borrador + avisos de validación; crear.
-2. **Editor** (Blazor) con pestañas; las pestañas Diseño, Orígenes, Modelo y HTML montan la isla con la vista correspondiente (una sola instancia, `handle.setView()`, para no perder deshacer/rehacer al cambiar de pestaña).
-3. Pestaña **HTML**: en modo manual, subir/pegar/editar (flujo actual del producto); si el HTML contiene `rpt-model`, ofrecer «Abrir en el diseñador» (`parseModelFromHtml`); avisos de orígenes no definidos o de librería no referenciada (`sourcesUsedInHtml`). En modo diseñador, HTML generado en solo lectura con opción «Convertir a manual».
-4. **Guardar** con nota de versión, validación en servidor (Fase 2) y control de concurrencia; aviso al salir con cambios sin guardar (`beforeunload` + `NavigationLock` de Blazor).
-5. **Historial** (Blazor): lista de versiones con autor, fecha, nota y etiqueta; ver, descargar, etiquetar, **comparar dos versiones** (isla en vista `compare` usando `diffVersions`/`lineDiff`), **restaurar total o parcial**, publicar/despublicar.
-6. Plantillas: guardarlas como datos (tabla `ReportTemplate` o recursos embebidos) en lugar de código, y permitir «Guardar como plantilla».
-7. e2e: crear un informe con el asistente de punta a punta, editarlo, comparar versiones, restaurar y publicar.
+1. **Asistente** (organización de `Wizard.jsx`): 1) información (nombre, descripción, carpeta, permisos); 2) orígenes (Fase 7); 3) diseño: galería (en blanco, **desde los datos** con diseño automático, plantillas, **subir HTML**) y diseñador (Fase 6); 4) revisión con `ReportViewer` sobre el borrador y avisos de validación.
+2. **Editor** con las pestañas del prototipo. El estado del borrador vive en un servicio *scoped* del cliente para no perder deshacer/rehacer al cambiar de pestaña.
+3. Pestaña **HTML**: en modo manual, subir/pegar/editar (flujo actual); si el HTML contiene `rpt-model`, «Abrir en el diseñador» (`ParseModelFromHtml`); avisos de orígenes no definidos o de librería no enlazada (y si lleva código pegado, ofrecer sustituirlo por el enlace). En modo diseñador, HTML generado en solo lectura con «Convertir a manual».
+4. **Guardar** con nota, validación en servidor y control de concurrencia; aviso al salir con cambios (`NavigationLock` de Blazor).
+5. **Historial**: versiones con autor, fecha, nota y etiqueta; ver, descargar, etiquetar, **comparar dos versiones** (diff de `Reporting.Core`), **restaurar total o parcial**, publicar/despublicar.
+6. Plantillas como datos (`ReportTemplate`) y «Guardar como plantilla».
+7. e2e: crear con el asistente de punta a punta, editar, comparar, restaurar y publicar.
 
-**Entregables:** asistente y editor nuevos sustituyendo a la pantalla actual.
-
-**Aceptación:** se puede crear un informe sin escribir HTML ni SQL; el flujo de subir HTML sigue funcionando igual que hoy; el historial cubre los casos de `HistoryTab.jsx`.
+**Aceptación:** se crea un informe sin escribir HTML ni SQL; subir HTML sigue funcionando como hoy (pero enlazando la librería); el historial cubre los casos de `HistoryTab.jsx`.
 
 ---
 
-### Fase 8 · Listado de informes
+### Fase 9 · Listado de informes
 
 **Objetivo:** mejorar la página existente de informes por permisos.
 
-**Referencia en el prototipo:** `src/pages/ReportList.jsx` (buscador, filtros por modo/estado, orden, duplicar, exportar/importar).
+**Referencia en el prototipo:** `src/pages/ReportList.jsx`.
 
 **Tareas**
 
-1. Mantener el filtrado por permisos actual y añadir: buscador (nombre/descripción), filtros por carpeta, modo (diseñador/manual), estado (borrador/publicado) y autor; orden por nombre o fecha; paginación en servidor.
-2. Acciones según permisos: ver (Fase 4), editar, duplicar, eliminar, publicar, exportar/importar JSON (con o sin historial), **añadir al dashboard**.
+1. Mantener el filtrado por permisos y añadir buscador, filtros (carpeta, modo, estado, autor, «Revisar» de la migración de la Fase 1), orden y paginación en servidor.
+2. Acciones según permisos: ver (Fase 5), editar, duplicar, eliminar, publicar, exportar/importar JSON, **añadir al dashboard**.
 3. Favoritos y recientes por usuario.
-4. Miniaturas (opcional): captura generada en servidor al publicar (headless Chromium, Fase 11) o icono por tipo.
-5. Indicadores: versión publicada, cambios sin publicar, fecha de última modificación.
+4. Indicadores: versión publicada, cambios sin publicar, última modificación, versión de librería.
 
-**Aceptación:** un usuario solo ve y opera los informes a los que tiene permiso; la búsqueda y los filtros funcionan con cientos de informes.
+**Aceptación:** cada usuario solo ve y opera lo que su permiso le deja; búsqueda y filtros funcionan con cientos de informes.
 
 ---
 
-### Fase 9 · Dashboard personalizable
+### Fase 10 · Dashboard personalizable
 
 **Objetivo:** pasar de «añadir informes» a un tablero flexible por usuario.
 
-**Referencia en el prototipo:** rejilla de 12 columnas y redimensionado del diseñador (`Designer.jsx`, `modelOps.js`), `ReportFrame.jsx` (estado y marcadores), RptLib (`renderComponent()`, `setFilter()`, `getState()/setState()`).
+**Referencia en el prototipo:** rejilla de 12 columnas y redimensionado del diseñador (`Designer.jsx`, `modelOps.js`; reutilizar `rptCanvas.js`), `ReportFrame.jsx` (estado y marcadores), RptLib (`renderComponent()`, `getState()/setState()`).
 
 **Tareas**
 
-1. Entidad `UserDashboard` (uno o varios por usuario, con uno por defecto) con `Tiles[]`: posición/tamaño en rejilla, tipo (`report` | `visual`), referencia (informe, versión publicada o «siempre la última publicada»), parámetros, marcador aplicado, título propio.
-2. Rejilla con arrastrar y redimensionar (biblioteca JS ligera o la lógica de rejilla de la isla) y modo edición/lectura; diseño adaptable a móvil.
-3. Mosaico **informe**: `ReportViewer` en modo compacto con parámetros y marcador propios.
-4. Mosaico **visual anclado** («anclar al dashboard» desde el menú de una tarjeta en el visor): guarda informe + id de celda + estado de filtros; se pinta solo ese componente con los datos del informe (endpoint de datos limitado a los orígenes que usa la celda).
-5. Actualización: manual y periódica configurable por mosaico; indicador de «actualizado hace…».
-6. Dashboards compartidos/predefinidos por rol (opcional): un administrador publica un dashboard base que los usuarios pueden clonar.
-7. Respeto de permisos: si el usuario pierde acceso a un informe, el mosaico muestra un aviso en lugar de los datos.
+1. `UserDashboard` (uno o varios por usuario, uno por defecto) con mosaicos: posición/tamaño en rejilla, tipo (`report` | `visual`), referencia (informe, versión fija o «última publicada»), parámetros, marcador, título.
+2. Rejilla en modo edición/lectura con `rptCanvas.js` (sin librería de rejilla de terceros); adaptable a móvil.
+3. Mosaico **informe**: `ReportViewer` compacto con parámetros y marcador propios.
+4. Mosaico **visual anclado** («Anclar al dashboard» desde el menú de una tarjeta): guarda informe + celda + estado de filtros; se pinta solo ese componente con los orígenes que usa.
+5. Actualización manual y periódica por mosaico, con «actualizado hace…».
+6. Dashboards base por rol que el usuario puede clonar (opcional).
+7. Si el usuario pierde el permiso sobre un informe, el mosaico muestra un aviso.
 
-**Aceptación:** el usuario compone, mueve y redimensiona mosaicos de informes y visuales, con parámetros propios, y el estado persiste entre sesiones y dispositivos.
+**Aceptación:** el usuario compone, mueve y redimensiona mosaicos con parámetros propios, y el estado persiste entre sesiones y dispositivos.
 
 ---
 
-### Fase 10 · Modelo semántico, analítica y paginados
+### Fase 11 · Modelo semántico, analítica y paginados
 
-**Objetivo:** habilitar en el producto las capacidades avanzadas de RptLib 1.2 que dependen del editor y del servidor.
+**Objetivo:** habilitar en el producto las capacidades avanzadas de la librería que dependen del editor.
 
-**Referencia en el prototipo:** `src/components/SemanticEditor.jsx`, `lib-src/rptlib-1.2/10-semantic.js` (relaciones, medidas, jerarquías, selección asociativa), `40-chart.js` y `50-viz.js` (comparación temporal, líneas de referencia, previsión, anomalías, narrativa, mapas, cascada, embudo, treemap, calendario, bullet, Sankey, múltiplos pequeños), `60-tables.js` (agrupación, subtotales, sparklines), `70-report.js` (páginas, filtros de informe, `collect()`), `htmlGenerator.js` (`paperCss`, páginas, `data-rpt-filters`), `exporters.js`, `e2e/v3.spec.js`.
+**Referencia en el prototipo:** `src/components/SemanticEditor.jsx`, `lib-src/rptlib-1.2/10-semantic.js` (relaciones, medidas, jerarquías, selección asociativa, `compileMeasure`), `40-chart.js`, `50-viz.js`, `60-tables.js`, `70-report.js`, `htmlGenerator.js` (`paperCss`, páginas, `data-rpt-filters`), `e2e/v3.spec.js`.
 
 **Tareas**
 
-1. Pestaña **Modelo** del editor (isla, vista `semantic`): relaciones entre orígenes con sugerencias, medidas con validación en vivo (`compileMeasure`), jerarquías, selección asociativa. Validar también en servidor al guardar (portar el analizador de medidas o ejecutarlo con un motor JS en servidor si se decide así en la Fase 0).
-2. **Multipágina** y filtros a nivel de informe (sincronizados o por página).
-3. **Paginados**: diseño de página (tamaño, orientación, márgenes, encabezado, pie, numeración, fecha), saltos de página, tablas agrupadas con subtotales, **subinformes** (ya soportados por el motor en la Fase 3; aquí la UI y los permisos).
-4. Visualizaciones y analítica de 1.2 disponibles en la paleta y el panel de propiedades (si se han ido ocultando en fases previas para reducir alcance, se activan aquí).
-5. Mapas: servir `maps/es.js` con la librería; documentar cómo añadir otros contornos.
-6. Tests e2e: portar `e2e/v3.spec.js`.
+1. Pestaña **Modelo** en Blazor: relaciones con sugerencias, medidas con validación en vivo, jerarquías, selección asociativa. Portar el analizador de medidas de `10-semantic.js` a `Reporting.Core` (validación en cliente y en servidor); la evaluación sigue en la librería.
+2. **Multipágina** y filtros de informe (sincronizados o por página).
+3. **Paginados**: diseño de página (tamaño, orientación, márgenes, encabezado, pie, numeración, fecha), saltos de página, tablas agrupadas con subtotales, subinformes (motor ya en la Fase 4).
+4. Visualizaciones y analítica de la librería (comparación temporal, líneas de referencia, previsión, anomalías, narrativa, mapa, cascada, embudo, treemap, calendario, bullet, Sankey, múltiplos pequeños) visibles en la paleta y el panel de propiedades. Si se ocultaron antes para reducir alcance, se activan aquí.
+5. e2e: portar `e2e/v3.spec.js`.
 
-**Aceptación:** la plantilla *Ventas 2025* del prototipo (3 páginas, modelo semántico, profundizar, comparación interanual, previsión, mapa, Sankey y tabla agrupada) se crea, guarda, publica y ve en el producto con el mismo resultado.
+**Aceptación:** la plantilla *Ventas 2025* del prototipo (3 páginas, modelo semántico, profundizar, comparación interanual, previsión, mapa, Sankey y tabla agrupada) se crea, guarda, publica y ve con el mismo resultado.
 
 ---
 
-### Fase 11 · Exportación en servidor y envíos programados
+### Fase 12 · Envíos programados
 
-**Objetivo:** generar PDF/Word/Excel sin navegador del usuario y enviar informes de forma programada.
-
-**Referencia en el prototipo:** `src/lib/exporters.js` (estructura de DOCX y XLSX a partir de `collect()`), `lib-src/rptlib-1.2/70-report.js` (`collect()`), `htmlGenerator.js` (`paperCss`).
+**Objetivo:** enviar informes de forma programada.
 
 **Tareas**
 
-1. Renderizado en servidor con **Playwright para .NET** (Chromium headless) sobre el endpoint `render`: PDF con `@page` (encabezado, pie, numeración) y ejecución de `RptLib.collect()` para obtener el contenido.
-2. Generación DOCX (Open XML SDK) y XLSX (ClosedXML u Open XML) en C# portando la estructura de `buildDocx`/`buildXlsx` (encabezado/pie, KPI, gráficos como imagen, tablas con cabecera repetida, hoja de resumen, formatos numéricos, esquema, autofiltro, cabecera fija). Alternativa: ejecutar `exporters.js` dentro del Chromium headless y devolver el binario (menos código nuevo).
-3. **Envíos programados** con *Background Jobs/Workers* de ABP (o Hangfire/Quartz si ya se usa): informe, parámetros (incluidas fechas relativas), formato, destinatarios, periodicidad; respetando los permisos del propietario o de cada destinatario.
-4. **Alertas** (opcional): condición sobre una medida/loseta (p. ej. ventas < objetivo) que dispara un aviso.
-5. Cola y límites de concurrencia de renderizado; almacenamiento temporal de ficheros (BLOB Storing de ABP).
+1. Programaciones con *Background Workers/Jobs* de ABP: informe, parámetros (incluidas fechas relativas resueltas al enviar), formato, destinatarios, periodicidad; con los permisos del propietario o de cada destinatario.
+2. **Excel** (y Word sin gráficos) sin navegador: generar con Open XML a partir de `RPT_DATA` y del modelo (tablas, KPI, agrupaciones), reutilizando el código de la Fase 5.
+3. **PDF y gráficos como imagen**: necesitan un navegador en servidor (Chromium headless). Es la única dependencia pesada del plan y requiere ADR. Alternativa sin dependencias: enviar un enlace al informe con los parámetros y adjuntar Excel.
+4. Alertas (opcional): condición sobre una medida que dispara un aviso.
+5. Cola y concurrencia de generación; ficheros temporales con BLOB Storing de ABP.
 
-**Aceptación:** un informe programado llega por correo en PDF/Excel con los parámetros resueltos en el momento del envío y coincide con lo que se ve en pantalla.
+**Aceptación:** un informe programado llega con los parámetros resueltos en el momento del envío y sus datos coinciden con los de pantalla.
 
 ---
 
-### Fase 12 · Endurecimiento
-
-**Objetivo:** preparar el producto para volumen, seguridad y operación.
+### Fase 13 · Endurecimiento
 
 **Tareas**
 
-1. **Rendimiento con orígenes grandes**: empujar agregaciones al servidor (consultas agregadas por visual según categoría/valores/filtros), paginación en servidor para tablas, muestreo para dispersión; mantener el modo actual (filas al cliente) para orígenes pequeños.
-2. **Seguridad por filas** (completar el punto de extensión de la Fase 3) por usuario, rol o inquilino.
-3. **Seguridad**: CSP del endpoint `render` (solo la librería y los datos; `img-src` controlado para logotipos), revisión de XSS en props (los textos de componentes y el logo), límites de tamaño de definiciones, *rate limiting* de los endpoints de datos, revisión de secretos de conexión.
-4. **Accesibilidad** (WCAG 2.1 AA) de las páginas Blazor y de la isla; mantener lo que ya hace RptLib (resúmenes para lectores de pantalla, navegación con teclado).
-5. **Observabilidad**: métricas de tiempo de consulta, tamaño de respuesta, errores por origen, uso por informe; panel de administración de «consultas lentas».
-6. **Documentación** de usuario (crear informes, consultas, modelo semántico) y de administración (catálogo de datos, versiones de la librería, permisos).
-7. Política de **actualización de librería**: asistente para mover informes a una versión nueva de RptLib con vista previa lado a lado y regresión visual.
+1. **Rendimiento**: empujar agregaciones a SQL Server (consulta agregada por visual según categoría, valores y filtros), paginación en servidor para tablas grandes, muestreo para dispersión; mantener el modo actual (filas al cliente) para orígenes pequeños. Revisar el tamaño de la descarga WASM (*trimming*, carga diferida del ensamblado del diseñador).
+2. **Seguridad por filas** (completar `IReportDataFilterProvider`) por usuario, rol o inquilino; valorar *Row-Level Security* nativa de SQL Server con `SESSION_CONTEXT`.
+3. **Seguridad**: CSP del endpoint de render (solo la librería y los datos; `img-src` controlado para logotipos), XSS en props de texto y logo, límites de tamaño de definiciones, *rate limiting* de datos y exportación, secretos de conexión.
+4. **Accesibilidad** (WCAG 2.1 AA) de las pantallas y del lienzo; mantener lo que ya hace la librería.
+5. **Observabilidad**: tiempo de consulta, tamaño de respuesta, errores por origen, uso por informe; panel de «consultas lentas».
+6. **Actualización de librería**: asistente para pasar informes de `0.9.0` a `1.x` (o entre versiones `1.x`) con vista previa lado a lado y regresión visual.
+7. Documentación de usuario y de administración.
 
 ---
 
-## 5. Dependencias entre fases
+### Fase 14 · Revisión visual con la librería corporativa
+
+**Objetivo:** alinear con la librería corporativa lo que se portó tal cual desde el prototipo.
+
+**Tareas**
+
+1. Recorrer la lista de «estilos portados pendientes de revisión» (2.8) pantalla a pantalla: listado, asistente, editor (diseño, orígenes, consultas, modelo, HTML, historial), visor y dashboard.
+2. Para cada caso: sustituir por un control corporativo existente, proponer un control nuevo a la librería corporativa (paleta de componentes, lienzo, editor de consultas, panel de propiedades…) o mantener el estilo propio documentado.
+3. Eliminar CSS portado que quede sin uso; unificar tokens (colores, espaciado, tipografía) con los corporativos.
+4. Revisar el tema de los informes (librería en el iframe) frente a la identidad corporativa y, si procede, publicar una versión de la librería con los nuevos tokens (sin cambiar los informes existentes, que siguen en su versión).
+5. Regresión visual de las pantallas antes y después.
+
+**Aceptación:** la lista de revisión está vacía (cada elemento resuelto o documentado como excepción).
+
+---
+
+## 5. Dependencias entre fases e hitos
 
 ```
-Fase 0 ──► Fase 1 (RptLib) ───────────────┐
-   │                                       ▼
-   ├────► Fase 2 (dominio/API) ──► Fase 3 (motor de datos) ──► Fase 4 (visor) ──► Fase 8 (listado)
-   │                                       │                         │            └► Fase 9 (dashboard)
-   │                                       ▼                         ▼
-   └────────────────────────────► Fase 5 (SDK isla) ──► Fase 6 (consultas) ──► Fase 7 (editor) ──► Fase 10
-                                                                                                  └► Fase 11 ──► Fase 12
+Fase 0 ─┬─► Fase 1 (librería: 1A ya, 1B después)
+        ├─► Fase 2 (Reporting.Core) ─┬─► Fase 3 (dominio/API) ─► Fase 4 (motor SQL Server) ─► Fase 5 (visor) ─┬─► Fase 9 (listado)
+        │                            │                                                                     └─► Fase 10 (dashboard)
+        │                            └─► Fase 6 (diseñador) ──► Fase 7 (consultas) ──► Fase 8 (editor) ──► Fase 11 ─► Fase 12 ─► Fase 13 ─► Fase 14
 ```
 
-- La Fase 1 puede ir en paralelo con la 2 y la 3.
-- La Fase 5 puede empezar tras la Fase 0 con un adaptador simulado; se conecta a la API cuando existan las Fases 2 y 3.
-- Las Fases 8 y 9 solo necesitan el visor (Fase 4): pueden entregarse antes que el diseñador.
-
-**Hitos sugeridos**
+- La **Fase 1A** (extraer y enlazar el código existente) se puede hacer nada más terminar el inventario: es el cambio de más valor inmediato y de menor riesgo.
+- Las Fases 1B, 2 y 3 pueden ir en paralelo.
+- La Fase 6 puede empezar en cuanto exista `Reporting.Core`, con datos de prueba; se conecta a la API cuando estén las Fases 3 y 4.
+- Las Fases 9 y 10 solo necesitan el visor (Fase 5): pueden entregarse antes que el diseñador.
 
 | Hito | Fases | Valor para el usuario |
 |---|---|---|
-| H1 · Base sólida | 0, 1, 2, 3 | Librería única y versionada; consultas seguras y parametrizadas; historial y publicación. |
-| H2 · Lectura | 4, 8, 9 | Mejor visor (filtros, marcadores, exportación), listado y dashboard mejorados. |
-| H3 · Autoría | 5, 6, 7 | Diseñador visual de informes y de consultas. |
-| H4 · Avanzado | 10, 11, 12 | Modelo semántico, paginados, envíos programados, rendimiento y seguridad. |
+| H1 · Base sólida | 0, 1, 2, 3, 4 | Librería enlazada y versionada (no pegada); consultas seguras y parametrizadas; historial y publicación. |
+| H2 · Lectura | 5, 9, 10 | Visor con filtros, marcadores y exportación; listado y dashboard mejorados. |
+| H3 · Autoría | 6, 7, 8 | Diseñador visual de informes y de consultas. |
+| H4 · Avanzado | 11, 12, 13 | Modelo semántico, paginados, envíos programados, rendimiento y seguridad. |
+| H5 · Acabado | 14 | Pantallas alineadas con la librería corporativa. |
 
 ---
 
@@ -498,23 +558,26 @@ Fase 0 ──► Fase 1 (RptLib) ───────────────�
 
 | Riesgo | Mitigación |
 |---|---|
-| Diferencias entre alasql (prototipo) y el dialecto real (funciones de fecha, `LIMIT`, comillas, tipos) | Generación/parsing en servidor por dialecto (Fase 6) y fixtures compartidos; BD de pruebas con `sampledb.json` para comparar resultados. |
-| Mantener React dentro de un producto Blazor | Encapsularlo en el SDK con API pequeña; el resto del producto no depende de React; documentar en ADR la opción de reescritura progresiva. |
-| Mensajes grandes por SignalR (Blazor Server) | Estado en la isla y guardado por HTTP (2.2). |
-| Seguridad de SQL libre | Permiso `EditSql`, parser real, lista blanca de tablas, usuario de solo lectura, timeout y límites, auditoría. |
-| Iframe sin `allow-same-origin` y autenticación | Datos inyectados en servidor o token firmado de corta duración; nunca relajar el sandbox. |
-| Romper informes existentes al cambiar la librería | Versiones inmutables, `libVersion` por informe, regresión visual, migración solo bajo demanda. |
-| Rendimiento con muchas filas en el cliente | Límite de filas desde la Fase 3 y agregación en servidor en la Fase 12. |
-| Alcance de RptLib 1.2 muy amplio | Ocultar en la paleta componentes avanzados hasta la Fase 10 (la librería ya los soporta; solo es UI). |
+| Informes existentes con el código pegado y **editado a mano** | Detección por hash; esos informes no se migran automáticamente y se marcan «Revisar». |
+| Diferencias entre el código existente y RptLib (marcado, API) | Matriz de compatibilidad (Fase 0), `0.9.0` intacta para los existentes y `05-compat.js` para facilitar el paso a `1.0.0`. |
+| Diferencias entre alasql (prototipo) y T-SQL | Generación y análisis en T-SQL con fixtures; BD de pruebas con `sampledb.json` para comparar resultados. |
+| Reescribir en Blazor la interacción del diseñador (arrastre, táctil, redimensionado) | Toda la lógica en C# probada; el JS se limita a eventos de puntero; portar los e2e del prototipo (escritorio y móvil) desde el principio. |
+| Editor SQL propio menos potente que CodeMirror | Alcance acotado (resaltado, autocompletado, errores); CodeMirror como opción con ADR si se queda corto. |
+| Tamaño de la descarga WASM | `Reporting.Core` sin dependencias; ScriptDom y Open XML solo en servidor; carga diferida del ensamblado del diseñador. |
+| Seguridad del SQL libre | `EditSql`, ScriptDom, lista blanca, usuario de solo lectura, timeout y límites, auditoría. |
+| Iframe sin `allow-same-origin` y autenticación | Datos inyectados con token de un solo uso; nunca relajar el sandbox. |
+| PDF programado necesita navegador en servidor | Decisión aparte con ADR; alternativa con enlace + Excel. |
+| Estilos replicados que divergen de la librería corporativa | Lista de revisión desde el primer día y Fase 14 dedicada. |
 
 ---
 
 ## 7. Definición de terminado (todas las fases)
 
-- Tests unitarios (Vitest / xUnit) y e2e (Playwright) de la funcionalidad, en CI y en verde; los casos portados del prototipo incluidos.
+- Tests xUnit/bUnit (y de la librería JS) y e2e Playwright de la funcionalidad, en CI y en verde, con los casos portados del prototipo.
 - Permisos ABP comprobados en servidor (nunca solo en la UI).
-- Textos localizados (ABP localization en .NET/Blazor; diccionarios en la librería y en la isla).
-- Accesible con teclado y lector de pantalla en lo nuevo.
-- Funciona en escritorio y móvil.
-- Documentación actualizada (este plan, README de `client/rptlib` y `client/rpt-designer`, ADRs).
-- Sin regresiones en los informes existentes (manuales) del producto.
+- Ninguna dependencia nueva fuera de la [política](#27-política-de-dependencias) sin ADR.
+- Textos localizados (ABP en .NET/Blazor; diccionarios en la librería).
+- Accesible con teclado y lector de pantalla en lo nuevo; funciona en escritorio y móvil.
+- Estilos: controles corporativos donde existan; lo portado anotado en la lista de revisión de la Fase 14.
+- Documentación actualizada (este plan, README de `client/rptlib`, ADR).
+- Sin regresiones en los informes existentes.

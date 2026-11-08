@@ -9,7 +9,8 @@ Este documento ordena en fases el trabajo para llevar las funcionalidades del **
 | Condición | Consecuencia en el plan |
 |---|---|
 | Ya existe JS/CSS de informes, pero se **pega dentro del HTML generado** | La Fase 1 empieza extrayendo ese código tal cual a una librería versionada, migra los informes para que la **enlacen** y después la unifica con RptLib. |
-| **Fundanet.Arco son librerías que se distribuyen como paquetes NuGet**; la solución incluye **Samples** para probarlas en local | Analytics **no crea proyectos nuevos**: se añade a los proyectos (y paquetes NuGet) que ya existen en `Fundanet.Arco`, en carpetas y espacios de nombres `Analytics`. No tiene host propio. La librería CSS/JS viaja **dentro del paquete Blazor existente** (activos estáticos de la RCL). Cada fase se prueba y se demuestra en **Samples**, que es también donde corren los e2e y la comparación visual. Ver [Distribución como NuGet y Samples](#211-distribución-como-nuget-y-samples). |
+| **Fundanet.Arco son librerías que se distribuyen como paquetes NuGet**; la solución incluye **Samples** para probarlas en local | La parte ABP de Analytics **no crea proyectos por capa**: se añade a los proyectos (y paquetes NuGet) que ya existen en `Fundanet.Arco`, en carpetas y espacios de nombres `Analytics`. No tiene host propio. Las únicas excepciones son los dos proyectos **agnósticos a ABP** de la fila siguiente. Cada fase se prueba y se demuestra en **Samples**, que es también donde corren los e2e y la comparación visual. Ver [Distribución como NuGet y Samples](#211-distribución-como-nuget-y-samples). |
+| **El código Blazor va en un proyecto aparte, agnóstico a ABP** (sin dependencias de ABP) | Dos proyectos nuevos sin ABP: `Fundanet.Arco.Analytics.Blazor` (RCL con todos los componentes, la hoja de estilos, los módulos JS y la librería CSS/JS) y `Fundanet.Arco.Analytics.Core` (núcleo C# que necesitan los componentes y el servidor). Los componentes hablan con el backend a través de **interfaces propias**; la implementación con ABP (proxies HTTP, permisos, localización, menú, páginas con ruta) vive en los proyectos existentes de Arco. Ver [Blazor agnóstico a ABP](#212-blazor-agnóstico-a-abp). |
 | **SQL Server** | Dialecto T-SQL en todo el plan: `@parámetros`, `TOP`/`OFFSET…FETCH`, `[identificadores]`, `DATEPART`/`EOMONTH`. Validación con el analizador oficial de T-SQL (ScriptDom). |
 | **Mínimas dependencias** | En el navegador, **ninguna librería JS de terceros salvo CodeMirror** (necesario para que el editor SQL sea igual que el del prototipo); fuera React, alasql y docx/exceljs. En .NET, solo paquetes de Microsoft. Ver la [política de dependencias](#27-política-de-dependencias). |
 | **Blazor WebAssembly** | El diseñador se hace **en Blazor**, con módulos JS pequeños y propios solo para lo que Blazor no puede hacer (arrastre con puntero, pintar los componentes con arco-analytics, `postMessage`). La lógica del modelo se porta a una **biblioteca C# compartida** entre el servidor y el cliente WASM. |
@@ -21,8 +22,8 @@ Este documento ordena en fases el trabajo para llevar las funcionalidades del **
 | Elemento | Nombre |
 |---|---|
 | Solución | `Fundanet.Arco` (librerías NuGet + `Samples`) |
-| Analytics en el código | Carpeta `Analytics/` y espacio de nombres `Fundanet.Arco.Analytics.*` **dentro de los proyectos existentes** de `Fundanet.Arco` (reparto por capa en 2.9). `Fundanet.Arco.Analytics.Core` es un espacio de nombres, no un proyecto |
-| Librería CSS/JS de informes | **arco-analytics**: `arco-analytics.css` y `arco-analytics.js`, publicadas dentro del paquete Blazor existente (`wwwroot/arco-analytics/<versión>/`) y servidas en `/_content/Fundanet.Arco.Blazor/arco-analytics/<versión>/` (URL base configurable); fuentes en `client/arco-analytics/` |
+| Analytics en el código | Proyectos nuevos agnósticos a ABP: `Fundanet.Arco.Analytics.Core` y `Fundanet.Arco.Analytics.Blazor`. Parte ABP: carpeta `Analytics/` y espacio de nombres `Fundanet.Arco.Analytics.*` **dentro de los proyectos existentes** de `Fundanet.Arco` (reparto en 2.9) |
+| Librería CSS/JS de informes | **arco-analytics**: `arco-analytics.css` y `arco-analytics.js`, publicadas dentro del paquete `Fundanet.Arco.Analytics.Blazor` (`wwwroot/arco-analytics/<versión>/`) y servidas en `/_content/Fundanet.Arco.Analytics.Blazor/arco-analytics/<versión>/` (URL base configurable); fuentes en `client/arco-analytics/` |
 | API JS global | `window.ArcoAnalytics` (en el prototipo, `window.RptLib`) |
 | Permisos ABP | `ArcoAnalytics.*` |
 
@@ -100,13 +101,13 @@ Igual que en el prototipo (`docs/ANALISIS.md`, §3): el diseñador edita un JSON
 
 ### 2.2 Diseñador en Blazor WebAssembly con módulos JS mínimos
 
-Con WebAssembly, C# se ejecuta en el navegador, la interop con JS es en proceso y no hay límites de SignalR. Eso hace viable el diseñador en Blazor sin arrastrar React:
+Con WebAssembly, C# se ejecuta en el navegador, la interop con JS es en proceso y no hay límites de SignalR. Eso hace viable el diseñador en Blazor sin arrastrar React. Todo lo de esta tabla vive en el proyecto agnóstico `Fundanet.Arco.Analytics.Blazor` (2.12):
 
 | En Blazor (C#) | En módulos JS propios (ES modules, sin dependencias) |
 |---|---|
 | Todo el estado del editor (modelo, selección, deshacer/rehacer), panel de propiedades generado desde el catálogo, editor de orígenes, parámetros, modelo semántico, historial, asistente, listado, dashboard | `rptCanvas.js`: arrastre, soltar y redimensionar con eventos de puntero (ratón y táctil). Solo emite **intenciones** («mover celda X a fila Y, posición Z», «ancho = 6»); el modelo lo cambia C#. |
 | Validaciones, generación de HTML y de SQL (vía `Fundanet.Arco.Analytics.Core`) | `rptLive.js`: pinta cada componente del lienzo con `ArcoAnalytics.renderComponent()`, como `LiveComponent.jsx` (WYSIWYG real con la misma librería). |
-| Llamadas a la API con los proxies HTTP de ABP | `rptQueryCanvas.js`: posiciones de las tablas y líneas SVG de las uniones del editor visual de consultas. |
+| Llamadas al backend a través de las interfaces del proyecto agnóstico (2.12); la implementación ABP usa los proxies HTTP | `rptQueryCanvas.js`: posiciones de las tablas y líneas SVG de las uniones del editor visual de consultas. |
 | | `rptSqlEditor.js`: envoltorio del editor SQL con **CodeMirror 6**, con la misma configuración que `SqlEditor.jsx` (`basicSetup`, `lang-sql`, `Mod-Enter` para ejecutar, autocompletado de tablas, columnas y orígenes). |
 | | `reportBridge.js`: `postMessage` con el iframe del informe. `download.js`: descargar ficheros. |
 
@@ -114,12 +115,12 @@ Cada módulo JS debe ser pequeño (orientativo: menos de 300 líneas) y no conte
 
 ### 2.3 Núcleo C# compartido entre servidor y cliente
 
-El espacio de nombres `Fundanet.Arco.Analytics.Core`, en la carpeta `Analytics/Core` del **proyecto compartido existente** que referencian tanto el servidor como el cliente WASM (normalmente `Fundanet.Arco.Domain.Shared`), **sin añadirle dependencias**, contiene la definición del informe, el catálogo de componentes, las operaciones sobre el modelo, la validación, el generador de HTML, el generador de T-SQL del editor visual, la resolución de parámetros y fechas relativas y la comparación de versiones. La usan:
+El proyecto `Fundanet.Arco.Analytics.Core` (`net10.0`, **sin dependencias**: ni ABP ni paquetes de terceros) contiene la definición del informe, el catálogo de componentes, las operaciones sobre el modelo, la validación, el generador de HTML, el generador de T-SQL del editor visual, la resolución de parámetros y fechas relativas y la comparación de versiones. La usan:
 
-- el **cliente WASM**: respuesta inmediata en el editor (SQL generado al momento, validación, HTML de la vista previa);
-- el **servidor**: autoridad. Regenera el HTML y el SQL al guardar y al ejecutar; nunca se fía de lo que envía el cliente.
+- el **cliente WASM** (desde `Fundanet.Arco.Analytics.Blazor`): respuesta inmediata en el editor (SQL generado al momento, validación, HTML de la vista previa);
+- el **servidor** (referenciado desde los proyectos ABP de Arco, p. ej. `Domain.Shared`): autoridad. Regenera el HTML y el SQL al guardar y al ejecutar; nunca se fía de lo que envía el cliente.
 
-Lo que necesita dependencias pesadas o acceso a datos (ScriptDom, ADO.NET, Open XML) **solo** está en el servidor, para no engordar la descarga WASM.
+Tiene que ser un proyecto propio porque los componentes agnósticos no pueden referenciar `Domain.Shared` (depende de ABP) y el servidor no debería depender de un proyecto de interfaz. Lo que necesita dependencias pesadas o acceso a datos (ScriptDom, ADO.NET, Open XML) **solo** está en el servidor, para no engordar la descarga WASM.
 
 ### 2.4 Las consultas se ejecutan en el servidor
 
@@ -130,7 +131,7 @@ Lo que necesita dependencias pesadas o acceso a datos (ScriptDom, ADO.NET, Open 
 
 ### 2.5 Librería de informes versionada e inmutable
 
-`/_content/Fundanet.Arco.Blazor/arco-analytics/<versión>/arco-analytics.{css,js}` con `Cache-Control: public, max-age=31536000, immutable`. Cada informe apunta a su versión (`model.libVersion`); publicar una versión nueva no cambia los informes existentes.
+`/_content/Fundanet.Arco.Analytics.Blazor/arco-analytics/<versión>/arco-analytics.{css,js}` con `Cache-Control: public, max-age=31536000, immutable`. Cada informe apunta a su versión (`model.libVersion`); publicar una versión nueva no cambia los informes existentes.
 
 - **Todas las versiones de la librería viajan en cada versión del paquete** Blazor de `Fundanet.Arco`: una aplicación que actualiza el NuGet sigue sirviendo las versiones que usan sus informes antiguos. CI comprueba que las carpetas de versiones ya publicadas no cambian (hashes del `manifest.json`).
 - **El HTML guardado no lleva la URL física.** Referencia la librería de forma lógica (`arco-analytics:<versión>/arco-analytics.css`) y el endpoint de renderizado, la vista previa y la descarga la resuelven con `ArcoAnalyticsOptions.LibraryBaseUrl` (por defecto la ruta `_content` de arriba, respetando el `PathBase` de la aplicación; se puede apuntar a un CDN). Así el mismo informe funciona en cualquier aplicación que use Arco.
@@ -146,8 +147,8 @@ El informe se pinta en `<iframe sandbox="allow-scripts">` **sin** `allow-same-or
 | JS en el navegador (librería e informes) | Nada de terceros: JS propio | — |
 | JS en el navegador (aplicación) | Módulos JS propios. **Única excepción: CodeMirror 6** (los paquetes que ya usa el prototipo, versión fija, empaquetados en un solo fichero local en `wwwroot`, sin CDN) para que el editor SQL sea idéntico | React → Blazor con marcado 1:1; alasql → servidor; `docx`/`exceljs` → exportación en servidor |
 | .NET servidor | Lo que ya trae la plantilla de ABP; `Microsoft.Data.SqlClient` (ADO.NET, sin Dapper); `Microsoft.SqlServer.TransactSql.ScriptDom` (validar y analizar T-SQL); `DocumentFormat.OpenXml` (Word/Excel) | Dapper, ClosedXML, generadores de PDF de terceros |
-| Transitivas para quien consume los paquetes de `Fundanet.Arco` | Al no haber proyectos propios, las dependencias nuevas llegan a **todas** las aplicaciones que usan el paquete donde se añaden. Por eso: nada nuevo en `Domain.Shared`, `Domain` ni `Blazor`; ScriptDom solo en el proyecto de infraestructura SQL Server (`EntityFrameworkCore`, que ya trae `SqlClient`); Open XML solo en `Application`. Se anotan en el `CHANGELOG` |  |
-| .NET cliente WASM | Lo que ya trae ABP + `Fundanet.Arco.Analytics.Core` | Paquetes de componentes de terceros (se usa la librería corporativa) |
+| Transitivas para quien consume los paquetes de `Fundanet.Arco` | Al no haber proyectos propios, las dependencias nuevas llegan a **todas** las aplicaciones que usan el paquete donde se añaden. Por eso: nada nuevo en `Domain.Shared`, `Domain`, `Blazor`, `Analytics.Core` ni `Analytics.Blazor` (este último solo depende de `Analytics.Core` y del framework de Blazor: `Microsoft.AspNetCore.Components.Web`, más `Microsoft.Extensions.Localization.Abstractions` si se usa `IStringLocalizer`); ScriptDom solo en el proyecto de infraestructura SQL Server (`EntityFrameworkCore`, que ya trae `SqlClient`); Open XML solo en `Application`. Se anotan en el `CHANGELOG` |  |
+| .NET cliente WASM | Lo que ya trae ABP + `Fundanet.Arco.Analytics.Core` + `Fundanet.Arco.Analytics.Blazor` (sin ABP) | Paquetes de componentes de terceros (se usa la librería corporativa) |
 | Solo desarrollo y CI | Node (scripts de build sin paquetes, como `build-rptlib.mjs`); runner de tests JS (`node:test`, o Vitest + jsdom si hace falta DOM); xUnit y bUnit; Playwright para e2e | — |
 | Opcional, decisión aparte | Chromium headless para PDF en servidor (solo si se necesitan envíos programados en PDF, Fase 12) | Por defecto: PDF con la impresión del navegador |
 
@@ -155,31 +156,40 @@ Cualquier dependencia nueva requiere un ADR breve: motivo, alternativa propia de
 
 ### 2.8 Estilos de las pantallas
 
-- `src/styles.css` se copia **literal** como hoja global de Analytics (activo estático de la RCL existente: `_content/Fundanet.Arco.Blazor/arco-analytics/app/arco-analytics-app.css`). Para que no choque con la librería corporativa, sus reglas se acotan a un contenedor raíz (`.arco-analytics-app …`) de forma mecánica, sin cambiar valores, y se fijan sus variables en ese contenedor. No se reescriben en `*.razor.css`: así el resultado es idéntico y las diferencias con el prototipo se ven con un `diff`.
+- `src/styles.css` se copia **literal** como hoja global de Analytics (activo estático de la RCL agnóstica: `_content/Fundanet.Arco.Analytics.Blazor/arco-analytics/app/arco-analytics-app.css`). Para que no choque con la librería corporativa, sus reglas se acotan a un contenedor raíz (`.arco-analytics-app …`) de forma mecánica, sin cambiar valores, y se fijan sus variables en ese contenedor. No se reescriben en `*.razor.css`: así el resultado es idéntico y las diferencias con el prototipo se ven con un `diff`.
 - Los componentes Razor generan **el mismo marcado** que los JSX (ver 2.10), así que esa hoja aplica sin cambios.
 - Donde ya existe un control corporativo maquetado **para exactamente lo mismo** (botones, pestañas, diálogos, campos de formulario…), se usa ese control, siempre que no cambie el comportamiento ni la organización de la pantalla.
 - Se mantiene una lista de «estilos del prototipo pendientes de revisión» que se resuelve en la Fase 14.
 - Los **informes** (lo que pinta la librería en el iframe) tienen su propio tema (Fase 1); no dependen de la librería corporativa.
 
-### 2.9 Reparto en los proyectos existentes de `Fundanet.Arco`
+### 2.9 Reparto en los proyectos de `Fundanet.Arco`
 
-Analytics **no tiene un proyecto por capa**: se añade a los proyectos que ya existen, en una carpeta `Analytics/` con espacio de nombres `Fundanet.Arco.Analytics.*`. Los nombres de proyecto de abajo son los habituales de ABP; en la Fase 0 se sustituyen por los reales de `Fundanet.Arco`.
+Analytics **no tiene un proyecto por capa**. Hay **dos proyectos nuevos agnósticos a ABP** y el resto se añade a los proyectos que ya existen, en una carpeta `Analytics/` con espacio de nombres `Fundanet.Arco.Analytics.*`. Los nombres de los proyectos existentes son los habituales de ABP; en la Fase 0 se sustituyen por los reales de `Fundanet.Arco`.
+
+**Proyectos nuevos (sin ABP)**
+
+| Proyecto | Contenido | Dependencias |
+|---|---|---|
+| `Fundanet.Arco.Analytics.Core` | Núcleo compartido servidor/WASM: modelo de la definición, catálogo, operaciones, HTML, T-SQL del editor visual, parámetros, diff (2.3). | Ninguna |
+| `Fundanet.Arco.Analytics.Blazor` (RCL) | **Todos** los componentes Razor (visor, barra de parámetros, diseñador, panel de propiedades, orígenes, editor de consultas, editor SQL, modelo, historial, asistente, editor, listado, dashboard), interfaces del backend y de la plataforma (2.12), `wwwroot/arco-analytics/app/` (hoja `arco-analytics-app.css`, módulos JS propios y CodeMirror empaquetado) y `wwwroot/arco-analytics/<versión>/` (**todas** las versiones de la librería, inmutables). | `Analytics.Core` y el framework de Blazor |
+
+**Proyectos existentes (con ABP)**
 
 | Proyecto existente (orientativo) | Qué se añade en `Analytics/` |
 |---|---|
-| `Fundanet.Arco.Domain.Shared` | `Analytics/Core/`: núcleo compartido servidor/WASM (modelo, catálogo, operaciones, HTML, T-SQL del editor visual, parámetros, diff), **sin dependencias nuevas**. Además: enums, constantes, `ArcoAnalyticsDbProperties`, recursos de localización. |
+| `Fundanet.Arco.Domain.Shared` | Referencia a `Analytics.Core`. Enums, constantes, `ArcoAnalyticsDbProperties`, recursos de localización. |
 | `Fundanet.Arco.Domain` | Entidades (`Report`, `ReportVersion`, `ReportBlock`, `ReportBookmark`, `UserDashboard`…), repositorios (interfaces), servicios de dominio y abstracciones del motor de datos (`IReportQueryExecutor`, `IReportSqlValidator`, `IAnalyticsConnectionProvider`, `IReportDataFilterProvider`). |
 | `Fundanet.Arco.Application.Contracts` | DTOs, interfaces de app services, permisos (`ArcoAnalytics.*`), *settings*. |
 | `Fundanet.Arco.Application` | App services, exportación Word/Excel con Open XML. |
 | `Fundanet.Arco.EntityFrameworkCore` | Mapeos de las entidades (llamados desde la configuración de `DbContext` que ya expone Arco), repositorios EF y la **infraestructura SQL Server** del motor: ejecución ADO.NET, validación con ScriptDom, lectura del catálogo (`sys.*`). |
 | `Fundanet.Arco.HttpApi` | Controladores: render del informe con token, datos, exportación (si no basta con los controladores automáticos de ABP). |
 | `Fundanet.Arco.HttpApi.Client` | Proxies HTTP para el cliente WASM. |
-| `Fundanet.Arco.Blazor` (RCL) | Páginas y componentes Razor (`Analytics/`), `wwwroot/arco-analytics/app/` (hoja `arco-analytics-app.css` y módulos JS propios: `rptCanvas.js`, `rptLive.js`…) y `wwwroot/arco-analytics/<versión>/` (**todas** las versiones de la librería, inmutables). |
-| `Fundanet.Arco.Blazor.WebAssembly` (si existe) | Registro de servicios del cliente, menú. |
-| Proyectos de test existentes | Carpetas `Analytics/` con los tests xUnit (casos portados del prototipo) y bUnit; fixtures JSON compartidos en `test/fixtures/analytics/`. |
+| `Fundanet.Arco.Blazor` (RCL) | Referencia a `Analytics.Blazor`. **Adaptadores ABP** de las interfaces de 2.12 (proxies HTTP, permisos, localización, avisos, navegación) y **páginas con ruta** (`@page`, `[Authorize]`, layout de ABP) que solo envuelven los componentes agnósticos. |
+| `Fundanet.Arco.Blazor.WebAssembly` (si existe) | Registro de los adaptadores y de los servicios del cliente, menú. |
+| Proyectos de test existentes | Carpetas `Analytics/` con los tests xUnit de la parte ABP. Los proyectos agnósticos tienen sus propios tests (`Fundanet.Arco.Analytics.Core.Tests`, `Fundanet.Arco.Analytics.Blazor.Tests` con bUnit y backend falso), también sin ABP; fixtures JSON compartidos en `test/fixtures/analytics/`. |
 | `Samples` | Host y cliente WASM de pruebas con Analytics activado (2.11); e2e Playwright y comparación visual. |
 
-Fuera de los proyectos .NET: `client/arco-analytics/` (fuentes de la librería CSS/JS, scripts de build y tests; el *release* copia a `Fundanet.Arco.Blazor/wwwroot/arco-analytics/<versión>/`).
+Fuera de los proyectos .NET: `client/arco-analytics/` (fuentes de la librería CSS/JS, scripts de build y tests; el *release* copia a `Fundanet.Arco.Analytics.Blazor/wwwroot/arco-analytics/<versión>/`).
 
 En la Fase 0 se confirma también la **topología de despliegue** (cliente WASM servido por el mismo host que la API o por separado): el endpoint de render y la librería deben quedar en el mismo origen o, si no, `LibraryBaseUrl` apunta al origen que sirve la RCL y se habilita CORS para esa ruta (necesario por los atributos `integrity`).
 
@@ -211,7 +221,7 @@ El diseñador y el resto de componentes (asistente, editor, orígenes de datos, 
 - **Activable**: como todas las aplicaciones que usan Arco recibirán Analytics al actualizar, se controla con una *feature* de ABP (`ArcoAnalytics.Enabled`, por aplicación o inquilino) que muestra u oculta menú y páginas y habilita los endpoints.
 - **Base de datos**: los mapeos de Analytics se incluyen en la configuración de `DbContext` que ya expone Arco; cada aplicación genera sus migraciones al actualizar (las tablas aparecen aunque la *feature* esté apagada). Prefijo de tablas y esquema según las convenciones de Arco (`ArcoAnalyticsDbProperties`).
 - **Configuración** con `ArcoAnalyticsOptions`: `LibraryBaseUrl`, filas máximas, timeout, tamaño máximo de respuesta, caducidad del token de renderizado, caché.
-- **Puntos de extensión** (interfaces con implementación por defecto que la aplicación puede sustituir): conexiones de datos (`IAnalyticsConnectionProvider`), seguridad por filas (`IReportDataFilterProvider`), destinos de envío (Fase 12). Los componentes Blazor se pueden reemplazar con el mecanismo de ABP.
+- **Puntos de extensión** (interfaces con implementación por defecto que la aplicación puede sustituir): conexiones de datos (`IAnalyticsConnectionProvider`), seguridad por filas (`IReportDataFilterProvider`), destinos de envío (Fase 12). Las páginas ABP que envuelven los componentes se pueden reemplazar con el mecanismo de ABP, y los componentes agnósticos se pueden usar directamente en otra página.
 - Permisos, *settings*, localización (es, en) y menú definidos en Arco; la aplicación solo los concede o personaliza.
 - Middleware `app.UseArcoAnalyticsAssets()` que añade `Cache-Control: immutable`, `charset` y `nosniff` a la ruta de la librería (los activos estáticos de las RCL los sirve la aplicación con `MapStaticAssets`/`UseStaticFiles`).
 - **Versionado de paquetes** SemVer, independiente del de la librería CSS/JS. Un cambio incompatible en la API pública, en el esquema de BD o en el formato de la definición supone versión mayor, entrada en el `CHANGELOG` y guía de actualización (`docs/upgrade/<versión>.md`). Para cada hito se publican versiones `-preview.N`.
@@ -223,6 +233,38 @@ El diseñador y el resto de componentes (asistente, editor, orígenes de datos, 
 - Incluye también informes «antiguos» con el JS/CSS pegado para probar la migración de la Fase 1.
 - Los e2e portados del prototipo y la comparación visual lado a lado (2.10) se ejecutan contra Samples en CI.
 - Además, una prueba de humo consume los **paquetes NuGet empaquetados** (no las referencias de proyecto) para detectar fallos de empaquetado: activos estáticos que faltan, dependencias transitivas, versiones de la librería no incluidas.
+
+### 2.12 Blazor agnóstico a ABP
+
+`Fundanet.Arco.Analytics.Blazor` no referencia ningún paquete `Volo.*` ni ningún proyecto de Arco con ABP. Todo lo que necesita de fuera lo pide mediante **interfaces definidas en el propio proyecto**, que la aplicación implementa. En Arco, la implementación usa ABP; otra aplicación podría implementarlas sin ABP.
+
+**Interfaces del backend** (asíncronas, con tipos de `Analytics.Core` o DTOs propios del proyecto, nunca DTOs de ABP):
+
+| Interfaz | Casos de uso (los de `store.js` y `sqlEngine.js` del prototipo) |
+|---|---|
+| `IReportStore` | Listar con filtros y paginación, obtener, crear, guardar con nota, duplicar, eliminar, exportar/importar. |
+| `IReportHistoryStore` | Versiones, ver, etiquetar, restaurar total o parcial, publicar/despublicar. |
+| `IReportDataService` | Datos de un informe publicado, vista previa de una definición, vista previa de un origen, URL de renderizado de un solo uso, exportación Word/Excel. |
+| `IDataCatalogService` | Conexiones, esquema (tablas, columnas, relaciones), SQL → visual, validación de SQL. |
+| `IBlockStore`, `IBookmarkStore`, `IDashboardStore`, `ITemplateStore` | Bloques reutilizables, marcadores, dashboards de usuario, plantillas. |
+
+**Interfaces de plataforma:**
+
+| Interfaz | Para qué |
+|---|---|
+| `IAnalyticsAuthorization` | Qué puede hacer el usuario (crear, editar, editar SQL, publicar, borrar…). Los componentes solo ocultan o deshabilitan; la comprobación real sigue en el servidor. |
+| `IStringLocalizer<AnalyticsResource>` (abstracciones de Microsoft) | Textos. El recurso y sus traducciones viven en el proyecto agnóstico; la parte ABP puede enlazarlo con su sistema de localización. |
+| `IAnalyticsNotifier` | Avisos, confirmaciones y errores (en Arco, con los diálogos y notificaciones de ABP/corporativos). |
+| `IAnalyticsNavigation` | Rutas entre pantallas (abrir editor, visor, volver al listado), porque las rutas las definen las páginas de la aplicación. |
+| `AnalyticsUiOptions` | `LibraryBaseUrl` de la librería, idioma, tema, límites de la interfaz. |
+
+**Reglas**
+
+- Los componentes agnósticos **no tienen `@page`** ni atributos de autorización: son componentes con parámetros (`<ReportListView>`, `<ReportEditorView>`, `<ReportViewer>`, `<DashboardView>`…). Las páginas con ruta, el layout y el menú están en la parte ABP.
+- Registro con una extensión propia: `services.AddArcoAnalyticsBlazor(options => …)`; la parte ABP llama además a `AddArcoAnalyticsAbpAdapters()` (o equivalente) para registrar sus implementaciones.
+- **Controles corporativos**: en la Fase 0 se comprueba si la librería corporativa depende de ABP. Si no depende, el proyecto agnóstico puede usarla donde corresponda (2.8). Si depende, el proyecto agnóstico usa el marcado del prototipo y, si hace falta, expone `RenderFragment` para que la parte ABP inyecte los controles corporativos.
+- CI falla si `Fundanet.Arco.Analytics.Core` o `Fundanet.Arco.Analytics.Blazor` acaban referenciando ABP, directa o transitivamente (comprobación del grafo de dependencias en el build).
+- Los tests bUnit y la comparación visual con el prototipo pueden ejecutarse sobre una página de pruebas con **implementaciones falsas** de las interfaces, sin ABP ni base de datos; Samples sigue siendo la prueba de integración completa.
 
 ---
 
@@ -239,16 +281,16 @@ El diseñador y el resto de componentes (asistente, editor, orígenes de datos, 
 | `sqlToBuilder.js` | Servicio de servidor con ScriptDom | **Portar** (Fase 7) |
 | `reportData.js` (`buildFullData`, subinformes) | `Domain` → `ReportDataEngine` | **Portar** (Fase 4) |
 | `getSchema()` / `getRelations()` | Catálogo de datos (`sys.tables`, `sys.columns`, `sys.foreign_keys`) + lista blanca | **Reescribir** (Fase 4) |
-| `store.js` | Entidades ABP + app services + EF Core | **Reescribir** (la API de `store.js` es la lista de casos de uso) (Fase 3) |
-| `Designer.jsx`, `PropertyPanel.jsx`, `ShowMePanel.jsx`, `LiveComponent.jsx` | Componentes Blazor + `rptCanvas.js` + `rptLive.js` | **Portar 1:1 a Blazor** (Fase 6) |
-| `QueryBuilder.jsx`, `SqlEditor.jsx`, `DataSourcesEditor.jsx` | Componentes Blazor + `rptQueryCanvas.js` + `rptSqlEditor.js` (CodeMirror) | **Portar 1:1 a Blazor** (Fase 7) |
+| `store.js` | Interfaces de `Analytics.Blazor` (2.12) implementadas con entidades ABP + app services + EF Core | **Reescribir** (la API de `store.js` es la lista de casos de uso) (Fase 3) |
+| `Designer.jsx`, `PropertyPanel.jsx`, `ShowMePanel.jsx`, `LiveComponent.jsx` | Componentes de `Analytics.Blazor` + `rptCanvas.js` + `rptLive.js` | **Portar 1:1 a Blazor** (Fase 6) |
+| `QueryBuilder.jsx`, `SqlEditor.jsx`, `DataSourcesEditor.jsx` | Componentes de `Analytics.Blazor` + `rptQueryCanvas.js` + `rptSqlEditor.js` (CodeMirror) | **Portar 1:1 a Blazor** (Fase 7) |
 | `SemanticEditor.jsx` | Componente Blazor | **Portar 1:1 a Blazor** (Fase 11) |
 | `ReportFrame.jsx`, `ParamsBar.jsx`, `Viewer.jsx` | `ReportViewer`, `ReportParamsBar` + `reportBridge.js` | **Portar 1:1 a Blazor** (Fase 5) |
 | `exporters.js` (docx/exceljs en el cliente) | Open XML SDK en servidor a partir de `collect()` | **Portar** la estructura (Fase 5) |
 | `ReportList.jsx`, `Wizard.jsx`, `ReportEditor.jsx`, `HistoryTab.jsx`, `HtmlTab.jsx` | Páginas Blazor existentes | **Rehacer** como en el prototipo, 1:1 (Fases 8 y 9) |
 | `src/styles.css` | Hoja global de Analytics, copiada literal y acotada a `.arco-analytics-app` | **Copiar** (2.8) y revisar en la Fase 14 |
 | `src/components/Icon.jsx` | Componente `Icon.razor` con los mismos trazados SVG | **Copiar** |
-| `tests/*.test.js` | xUnit (carpetas `Analytics/` de los proyectos de test existentes) y tests JS de la librería | **Portar** |
+| `tests/*.test.js` | xUnit (`Analytics.Core.Tests` y carpetas `Analytics/` de los tests existentes), bUnit (`Analytics.Blazor.Tests`) y tests JS de la librería | **Portar** |
 | `e2e/*.spec.js` | Playwright contra la aplicación Blazor | **Portar** |
 
 ---
@@ -287,7 +329,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
    - `ArcoAnalytics.DataCatalog.Manage` (conexiones y tablas expuestas)
    - `ArcoAnalytics.Dashboard` (personalizar el propio)
 
-**Entregables:** inventario y matriz de compatibilidad, reparto definitivo en los proyectos existentes y topología de despliegue (2.9), carpetas `Analytics/` creadas, *feature* `ArcoAnalytics.Enabled` y Samples con Analytics activado, mapa pantalla → controles corporativos, **lista de paridad** (`docs/paridad.md`, ver 2.10) y la prueba de comparación visual lado a lado preparada, ADR, JSON Schemas, fixtures, permisos.
+**Entregables:** inventario y matriz de compatibilidad, reparto definitivo en los proyectos existentes y topología de despliegue (2.9), proyectos `Fundanet.Arco.Analytics.Core` y `Fundanet.Arco.Analytics.Blazor` creados con la comprobación de «sin ABP» en CI, carpetas `Analytics/` creadas, *feature* `ArcoAnalytics.Enabled`, Samples con Analytics activado, dependencia ABP o no de la librería corporativa (2.12), mapa pantalla → controles corporativos, **lista de paridad** (`docs/paridad.md`, ver 2.10) y la prueba de comparación visual lado a lado preparada, ADR, JSON Schemas, fixtures, permisos.
 
 **Aceptación:** las plantillas del prototipo validan contra los JSON Schemas; se sabe qué informes existentes llevan el código pegado sin modificar.
 
@@ -301,7 +343,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 
 **1A · Extraer el código existente tal cual (versión `0.9.0`)**
 
-1. Llevar el JS/CSS que hoy se pega a `client/arco-analytics/legacy/` **sin cambios funcionales** y publicarlo en la RCL `Fundanet.Arco.Blazor` como `wwwroot/arco-analytics/0.9.0/arco-analytics.{css,js}` (servido en `/_content/Fundanet.Arco.Blazor/arco-analytics/0.9.0/`).
+1. Llevar el JS/CSS que hoy se pega a `client/arco-analytics/legacy/` **sin cambios funcionales** y publicarlo en la RCL `Fundanet.Arco.Analytics.Blazor` como `wwwroot/arco-analytics/0.9.0/arco-analytics.{css,js}` (servido en `/_content/Fundanet.Arco.Analytics.Blazor/arco-analytics/0.9.0/`).
 2. Middleware `UseArcoAnalyticsAssets()` y opción `LibraryBaseUrl` (2.5 y 2.11), probados en Samples y en la prueba de humo con el paquete NuGet.
 3. Cambiar la generación del informe: en lugar de pegar el código, añadir `<link rel="stylesheet" href="arco-analytics:0.9.0/arco-analytics.css">` y `<script src="arco-analytics:0.9.0/arco-analytics.js" defer></script>`, que se resuelven a la URL real al renderizar (2.5).
 4. **Migración de informes existentes**: tarea de datos idempotente incluida en Arco, que cada aplicación ejecuta al actualizar el paquete (2.11):
@@ -317,14 +359,14 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 2. Si el marcado de los informes existentes difiere del de RptLib (casos (a) con diferencias), añadir un módulo `05-compat.js` que traduzca el marcado antiguo, para que un informe pueda pasar de `0.9.0` a `1.0.0` sin reescribirse. Si no compensa, documentarlo y dejar esos informes en `0.9.0`.
 3. **Nombre**: ficheros `arco-analytics.css` y `arco-analytics.js`, cabecera `/*! arco-analytics <versión> */` y API global `window.ArcoAnalytics` (en lugar de `window.RptLib`). Los prefijos del formato del HTML (`data-rpt`, clases `rpt-`, variables `--rpt-*`, `window.RPT_DATA`, mensajes `rpt:*`) se mantienen como en el prototipo por paridad y para portar los tests sin cambios. Si se quieren renombrar (p. ej. a `aa-`), se decide en un ADR de la Fase 0 y se hace en `1.0.0`, antes de que exista ningún informe del diseñador.
 4. Build con un script de Node **sin paquetes**, como `build-rptlib.mjs`: concatena módulos, escapa lo no ASCII (`\uXXXX`), genera `arco-analytics.js` y `arco-analytics.css`, calcula hashes **SRI** (`crypto` de Node) y escribe un `manifest.json` (versión, ficheros, hashes, cambios). Minificar solo si compensa; si se hace, que sea con una herramienta de desarrollo, nunca en runtime.
-5. El script `release` copia la salida a `Fundanet.Arco.Blazor/wwwroot/arco-analytics/<versión>/` y **falla si la carpeta ya existe**: una versión publicada no se modifica; una corrección es una versión de parche. El paquete NuGet se publica con su propio SemVer (2.11).
+5. El script `release` copia la salida a `Fundanet.Arco.Analytics.Blazor/wwwroot/arco-analytics/<versión>/` y **falla si la carpeta ya existe**: una versión publicada no se modifica; una corrección es una versión de parche. El paquete NuGet se publica con su propio SemVer (2.11).
 6. Incluir `maps/es.js` (carga bajo demanda, ruta relativa al script como `BASE` en `00-core.js`).
 7. **Internacionalización**: sacar los textos fijos (menú «Ver datos», «Exportar CSV», narrativa, «Página X de Y»…) a un diccionario por idioma, elegido con `<html lang>`; `es-ES` por defecto.
 8. **Tema de los informes**: mantener el de RptLib (variables `--rpt-brand`, `--rpt-bg`, paletas, densidad, claro/oscuro) y documentar cómo fija el host la marca del inquilino.
 9. Tests: unitarios (portar `tests/rptlib.test.js` y uno por componente con los fixtures) y regresión visual con Playwright por componente y tema.
 10. Documentación `client/arco-analytics/README.md`: atributos `data-rpt`, props por componente, modelo semántico en el HTML, API JS, protocolo `postMessage`, cambios entre `0.9.0` y `1.0.0`.
 
-**Entregables:** `0.9.0` dentro del paquete Blazor de Arco, tarea de migración y Samples migrado; `1.0.0` unificada, documentada y con tests; cambio en la generación para no volver a pegar código.
+**Entregables:** `0.9.0` dentro del paquete `Fundanet.Arco.Analytics.Blazor`, tarea de migración y Samples migrado; `1.0.0` unificada, documentada y con tests; cambio en la generación para no volver a pegar código.
 
 **Aceptación:** ningún informe nuevo lleva el código pegado; los migrados se ven igual; publicar dos veces la misma versión falla; las plantillas del prototipo se pintan con `1.0.0` igual que con RptLib 1.2.
 
@@ -338,7 +380,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 
 **Tareas**
 
-1. Carpeta `Analytics/Core` en el proyecto compartido existente (2.9), sin añadirle `PackageReference`, compatible con WASM (sin E/S, sin reflexión que impida el *trimming*; serialización con `System.Text.Json` y *source generators*).
+1. Proyecto `Fundanet.Arco.Analytics.Core` (`net10.0`, sin `PackageReference` ni referencias a ABP), compatible con WASM (sin E/S, sin reflexión que impida el *trimming*; serialización con `System.Text.Json` y *source generators*).
 2. **Tipos** (`record`) de `ReportDefinition`, `ReportModel`, `Page`, `Row`, `Cell`, `Theme`, `Paper`, `DataSource`, `QueryBuilderModel`, `ParamDef`, `SemanticModel`, `RptData`, conformes al JSON Schema de la Fase 0. Las props de cada celda como `JsonObject` (el catálogo define su forma).
 3. **Catálogo** (`catalog.js`): tipos de componente, grupos, iconos, valores por defecto, `span`, esquema de propiedades (`text`, `select`, `field`, `fields`, `bool`, `when`…), agregaciones, formatos. Es lo que usa Blazor para generar el panel de propiedades.
 4. **Operaciones sobre el modelo** (`modelOps.js`): insertar, mover, mover con teclado, actualizar, duplicar, borrar (simples y múltiples), alinear en fila, pegar, filas, páginas, `renameSource`, `renameSourceInSemantic`, `sourceUsage`, `validateModel`. Inmutables (devuelven un modelo nuevo) para que deshacer/rehacer sea una pila de modelos.
@@ -347,9 +389,9 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 7. **Parámetros**: definiciones, valores por defecto, fechas relativas, periodos predefinidos, `daterange` (`@p_desde`/`@p_hasta`), detección de parámetros y de dependencias `origen.<id>` en un SQL, orden de ejecución con ciclos.
 8. **Comparación de versiones** (`diff.js`): diferencias de componentes, SQL línea a línea, parámetros y tema.
 9. **Diseño automático, Show Me, temas JSON (compatibles con Power BI) y plantillas** (`autoLayout.js`, `showMe.js`, `themes.js`, `templates.js`).
-10. Tests xUnit (carpeta `Analytics/Core` del proyecto de test correspondiente) con los fixtures de `test/fixtures/analytics/`. Para el HTML, comparar con el que genera el prototipo para las plantillas (normalizando la URL de la librería).
+10. Tests xUnit (`Fundanet.Arco.Analytics.Core.Tests`) con los fixtures de `test/fixtures/analytics/`. Para el HTML, comparar con el que genera el prototipo para las plantillas (normalizando la URL de la librería).
 
-**Entregables:** `Fundanet.Arco.Analytics.Core` con tests, usado desde el servidor y desde el cliente Blazor.
+**Entregables:** `Fundanet.Arco.Analytics.Core` con tests, referenciado desde la parte ABP del servidor y desde `Fundanet.Arco.Analytics.Blazor`.
 
 **Aceptación:** todos los casos portados de `tests/core.test.js`, `features.test.js` y `queryBuilder.test.js` pasan; el HTML generado para las plantillas equivale al del prototipo; el ensamblado funciona en WASM.
 
@@ -373,6 +415,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 8. Concurrencia optimista con `ConcurrencyStamp`: el segundo guardado recibe conflicto y se le ofrece comparar.
 9. Retención de versiones configurable con *Settings* de ABP (el prototipo usa 50), sin borrar nunca la publicada ni las etiquetadas.
 10. Tests xUnit de dominio y aplicación (base de tests de ABP).
+11. Definir en `Fundanet.Arco.Analytics.Blazor` las interfaces `IReportStore` e `IReportHistoryStore` (2.12) y sus adaptadores ABP en `Fundanet.Arco.Blazor` sobre los proxies de estos app services.
 
 **Aceptación:** los casos de uso de `store.js` existen en la API; los informes existentes se siguen viendo; las versiones no se pueden modificar; restaurar crea una versión nueva.
 
@@ -416,7 +459,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 
 **Tareas**
 
-1. `ReportViewer` (Blazor) con `ReportId`, `VersionId?`, `InitialParams`, `InitialState`, `Height`, `ShowToolbar`, `Compact` (dashboard). Organización de la barra igual que `ReportFrame.jsx`, con controles corporativos donde existan.
+1. `ReportViewer` (en `Fundanet.Arco.Analytics.Blazor`, sin ABP) con `ReportId`, `VersionId?`, `InitialParams`, `InitialState`, `Height`, `ShowToolbar`, `Compact` (dashboard). Organización de la barra igual que `ReportFrame.jsx`, con controles corporativos donde existan.
 2. `<iframe sandbox="allow-scripts">` con la URL de un solo uso (Fase 4) o `srcdoc` para el borrador del editor (HTML de `Fundanet.Arco.Analytics.Core` + datos de `preview`).
 3. `reportBridge.js` (módulo ES propio): escucha `message`, acepta solo `event.source === iframe.contentWindow`, reenvía `rpt:ready`, `rpt:state`, `rpt:filters`, `rpt:collected` a .NET (`DotNetObjectReference`) y expone `post(message)`.
 4. `ReportParamsBar`: controles generados desde la definición (texto, número, fecha, lista, rango con periodos predefinidos); «Aplicar» recarga.
@@ -424,7 +467,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 6. **Exportación Word/Excel en servidor**: el visor pide `rpt:collect` (contenido real: filtros aplicados, imágenes de gráficos, valores de tablas y grupos) y lo envía a `POST /api/app/report-export/{docx|xlsx}`; el servidor genera el fichero con **Open XML SDK** portando la estructura de `buildDocx`/`buildXlsx` (encabezado/pie, numeración, KPI, gráficos como imagen, tablas con cabecera repetida; hoja de resumen, formatos numéricos, esquema por grupos, totales, autofiltro, cabecera fija). `download.js` descarga el resultado. CSV ya lo hace la librería.
 7. **Marcadores** sobre `ReportBookmark`: guardar (`rpt:state`), aplicar (`rpt:setState`), compartir por enlace con el id del marcador.
 8. Estados de carga, error por origen y vacío; textos localizados con ABP.
-9. Usar el visor en el **listado** y en el **dashboard actual** desde ya, para validarlo con usuarios reales.
+9. Interfaces `IReportDataService`, `IBookmarkStore`, `IAnalyticsAuthorization`, `IAnalyticsNotifier` (2.12) y sus adaptadores ABP. Usar el visor en el **listado** y en el **dashboard actual** desde ya, para validarlo con usuarios reales.
 10. Tests bUnit y e2e Playwright (escenarios de lectura de `e2e/app.spec.js`: filtros, filtro cruzado, ver datos, exportar).
 
 **Aceptación:** un informe migrado (manual) y una plantilla del prototipo se ven en el listado y en el dashboard con parámetros, filtros, marcadores y exportación a PDF/Word/Excel/CSV; el iframe no puede acceder a la sesión; el visor es igual que el del prototipo (comparación visual, 2.10).
@@ -439,7 +482,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 
 **Tareas**
 
-1. Componentes Blazor con la estructura del prototipo: `DesignerPalette`, `DesignerCanvas` (páginas → filas → celdas), `PropertyPanel`, `ShowMePanel`, `ThemePanel`, `BlocksPanel`. En móvil, paleta/lienzo/propiedades como pestañas, como en el prototipo.
+1. Componentes en `Fundanet.Arco.Analytics.Blazor` (sin ABP) con la estructura del prototipo: `DesignerPalette`, `DesignerCanvas` (páginas → filas → celdas), `PropertyPanel`, `ShowMePanel`, `ThemePanel`, `BlocksPanel`. En móvil, paleta/lienzo/propiedades como pestañas, como en el prototipo.
 2. **Estado del editor en C#**: modelo inmutable de `Fundanet.Arco.Analytics.Core`, selección (simple y múltiple), pila de deshacer/rehacer, portapapeles (en `localStorage` del navegador para copiar/pegar entre informes, vía interop mínima).
 3. `rptCanvas.js`: arrastrar desde la paleta y entre filas, «tocar para insertar» en móvil, redimensionar por los bordes (ancho en 12 columnas y alto); calcula el destino y llama a .NET con la intención; .NET aplica `moveCell`/`insertCell`/`updateCell` y vuelve a pintar.
 4. `rptLive.js`: carga la librería de la versión del informe en la página de la aplicación y pinta cada celda con `ArcoAnalytics.renderComponent(el, type, props, source, { interactive: false, … })` y los datos de la vista previa. Es código propio y las props se escapan en la librería; si se prefiere aislar, pintar el lienzo dentro de un iframe del mismo origen.
@@ -481,6 +524,8 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 
 **Tareas**
 
+Las pantallas son componentes agnósticos (`<ReportWizardView>`, `<ReportEditorView>`) en `Fundanet.Arco.Analytics.Blazor`; la parte ABP aporta las páginas con ruta que los envuelven.
+
 1. **Asistente** (organización de `Wizard.jsx`): 1) información (nombre, descripción, carpeta, permisos); 2) orígenes (Fase 7); 3) diseño: galería (en blanco, **desde los datos** con diseño automático, plantillas, **subir HTML**) y diseñador (Fase 6); 4) revisión con `ReportViewer` sobre el borrador y avisos de validación.
 2. **Editor** con las pestañas del prototipo. El estado del borrador vive en un servicio *scoped* del cliente para no perder deshacer/rehacer al cambiar de pestaña.
 3. Pestaña **HTML**: en modo manual, subir/pegar/editar (flujo actual); si el HTML contiene `rpt-model`, «Abrir en el diseñador» (`ParseModelFromHtml`); avisos de orígenes no definidos o de librería no enlazada (y si lleva código pegado, ofrecer sustituirlo por el enlace). En modo diseñador, HTML generado en solo lectura con «Convertir a manual».
@@ -501,7 +546,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 
 **Tareas**
 
-1. Mantener el filtrado por permisos y añadir buscador, filtros (carpeta, modo, estado, autor, «Revisar» de la migración de la Fase 1), orden y paginación en servidor.
+1. Componente agnóstico `<ReportListView>` (página ABP que lo envuelve). Mantener el filtrado por permisos y añadir buscador, filtros (carpeta, modo, estado, autor, «Revisar» de la migración de la Fase 1), orden y paginación en servidor.
 2. Acciones según permisos: ver (Fase 5), editar, duplicar, eliminar, publicar, exportar/importar JSON, **añadir al dashboard**.
 3. Favoritos y recientes por usuario.
 4. Indicadores: versión publicada, cambios sin publicar, última modificación, versión de librería.
@@ -519,7 +564,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 **Tareas**
 
 1. `UserDashboard` (uno o varios por usuario, uno por defecto) con mosaicos: posición/tamaño en rejilla, tipo (`report` | `visual`), referencia (informe, versión fija o «última publicada»), parámetros, marcador, título.
-2. Rejilla en modo edición/lectura con `rptCanvas.js` (sin librería de rejilla de terceros); adaptable a móvil.
+2. Componente agnóstico `<DashboardView>` sobre `IDashboardStore` (página ABP que lo envuelve). Rejilla en modo edición/lectura con `rptCanvas.js` (sin librería de rejilla de terceros); adaptable a móvil.
 3. Mosaico **informe**: `ReportViewer` compacto con parámetros y marcador propios.
 4. Mosaico **visual anclado** («Anclar al dashboard» desde el menú de una tarjeta): guarda informe + celda + estado de filtros; se pinta solo ese componente con los orígenes que usa.
 5. Actualización manual y periódica por mosaico, con «actualizado hace…».
@@ -632,6 +677,7 @@ Cada hito se publica como versiones `-preview.N` de los paquetes y la versión e
 | CodeMirror como dependencia | Versión fija empaquetada en local (sin CDN), envuelta en un único módulo para poder cambiarla sin tocar el resto. |
 | Tamaño de la descarga WASM | El núcleo (`Analytics/Core`) no añade dependencias al proyecto compartido; ScriptDom y Open XML solo en servidor; carga diferida del ensamblado del diseñador. |
 | Fallos de empaquetado NuGet (activos estáticos, versiones de la librería, dependencias transitivas) | Prueba de humo con los paquetes empaquetados en CI y comprobación de hashes de las versiones de la librería. |
+| Que se cuele una dependencia de ABP en los proyectos agnósticos | Comprobación del grafo de dependencias en CI; tests bUnit con implementaciones falsas, sin ABP. |
 | Analytics llega a todas las aplicaciones que usan Arco (tablas, dependencias, tamaño) | *Feature* `ArcoAnalytics.Enabled`, dependencias nuevas solo en los proyectos de servidor adecuados, `CHANGELOG` y guía de actualización. |
 | Cambios incompatibles para las aplicaciones que consumen Arco | SemVer, versiones `-preview` por hito, `CHANGELOG`, guías de actualización y tareas de migración de datos idempotentes. |
 | Seguridad del SQL libre | `EditSql`, ScriptDom, lista blanca, usuario de solo lectura, timeout y límites, auditoría. |
@@ -645,6 +691,7 @@ Cada hito se publica como versiones `-preview.N` de los paquetes y la versión e
 
 - Tests xUnit/bUnit (y de la librería JS) y e2e Playwright de la funcionalidad, en CI y en verde, con los casos portados del prototipo.
 - Permisos ABP comprobados en servidor (nunca solo en la UI).
+- `Fundanet.Arco.Analytics.Core` y `Fundanet.Arco.Analytics.Blazor` sin dependencias de ABP (comprobación de CI en verde).
 - Ninguna dependencia nueva fuera de la [política](#27-política-de-dependencias) sin ADR.
 - Textos localizados (ABP en .NET/Blazor; diccionarios en la librería).
 - Accesible con teclado y lector de pantalla en lo nuevo; funciona en escritorio y móvil.

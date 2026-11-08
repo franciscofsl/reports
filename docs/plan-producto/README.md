@@ -10,8 +10,9 @@ Este documento ordena en fases el trabajo para llevar las funcionalidades del **
 |---|---|
 | Ya existe JS/CSS de informes, pero se **pega dentro del HTML generado** | La Fase 1 empieza extrayendo ese código tal cual a una librería versionada, migra los informes para que la **enlacen** y después la unifica con RptLib. |
 | **SQL Server** | Dialecto T-SQL en todo el plan: `@parámetros`, `TOP`/`OFFSET…FETCH`, `[identificadores]`, `DATEPART`/`EOMONTH`. Validación con el analizador oficial de T-SQL (ScriptDom). |
-| **Mínimas dependencias** | En el navegador, **cero librerías JS de terceros** (ni React, ni CodeMirror, ni alasql, ni docx/exceljs). En .NET, solo paquetes de Microsoft. Ver la [política de dependencias](#27-política-de-dependencias). |
+| **Mínimas dependencias** | En el navegador, **ninguna librería JS de terceros salvo CodeMirror** (necesario para que el editor SQL sea igual que el del prototipo); fuera React, alasql y docx/exceljs. En .NET, solo paquetes de Microsoft. Ver la [política de dependencias](#27-política-de-dependencias). |
 | **Blazor WebAssembly** | El diseñador se hace **en Blazor**, con módulos JS pequeños y propios solo para lo que Blazor no puede hacer (arrastre con puntero, pintar RptLib, `postMessage`). La lógica del modelo se porta a una **biblioteca C# compartida** entre el servidor y el cliente WASM. |
+| **El diseñador y el resto de componentes deben ser tal cual el prototipo** | **Paridad total** de aspecto, organización, comportamiento y funciones: se porta 1:1 el marcado (mismos elementos, clases, ARIA e iconos) y se reutiliza `src/styles.css` literal. Nada se simplifica ni se recorta. Ver [Paridad con el prototipo](#210-paridad-con-el-prototipo). |
 | **Librería corporativa de controles** | Las pantallas replican **tal cual** los estilos y la organización del prototipo. Donde ya hay controles corporativos maquetados para lo mismo, se usan esos. La alineación final se hace en la [Fase 14](#fase-14--revisión-visual-con-la-librería-corporativa). |
 
 ---
@@ -93,7 +94,7 @@ Con WebAssembly, C# se ejecuta en el navegador, la interop con JS es en proceso 
 | Todo el estado del editor (modelo, selección, deshacer/rehacer), panel de propiedades generado desde el catálogo, editor de orígenes, parámetros, modelo semántico, historial, asistente, listado, dashboard | `rptCanvas.js`: arrastre, soltar y redimensionar con eventos de puntero (ratón y táctil). Solo emite **intenciones** («mover celda X a fila Y, posición Z», «ancho = 6»); el modelo lo cambia C#. |
 | Validaciones, generación de HTML y de SQL (vía `Reporting.Core`) | `rptLive.js`: pinta cada componente del lienzo con `RptLib.renderComponent()`, como `LiveComponent.jsx` (WYSIWYG real con la misma librería). |
 | Llamadas a la API con los proxies HTTP de ABP | `rptQueryCanvas.js`: posiciones de las tablas y líneas SVG de las uniones del editor visual de consultas. |
-| | `rptSqlEditor.js`: editor SQL ligero (`textarea` con capa de resaltado y lista de autocompletado; las sugerencias las calcula C#). |
+| | `rptSqlEditor.js`: envoltorio del editor SQL con **CodeMirror 6**, con la misma configuración que `SqlEditor.jsx` (`basicSetup`, `lang-sql`, `Mod-Enter` para ejecutar, autocompletado de tablas, columnas y orígenes). |
 | | `reportBridge.js`: `postMessage` con el iframe del informe. `download.js`: descargar ficheros. |
 
 Cada módulo JS debe ser pequeño (orientativo: menos de 300 líneas) y no contener lógica de negocio: esa vive en C# y tiene tests.
@@ -127,7 +128,7 @@ El informe se pinta en `<iframe sandbox="allow-scripts">` **sin** `allow-same-or
 | Ámbito | Permitido | Evitado (y su sustituto) |
 |---|---|---|
 | JS en el navegador (librería e informes) | Nada de terceros: JS propio | — |
-| JS en el navegador (aplicación) | Módulos JS propios | React → Blazor; CodeMirror → `rptSqlEditor.js`; alasql → servidor; `docx`/`exceljs` → exportación en servidor |
+| JS en el navegador (aplicación) | Módulos JS propios. **Única excepción: CodeMirror 6** (los paquetes que ya usa el prototipo, versión fija, empaquetados en un solo fichero local en `wwwroot`, sin CDN) para que el editor SQL sea idéntico | React → Blazor con marcado 1:1; alasql → servidor; `docx`/`exceljs` → exportación en servidor |
 | .NET servidor | Lo que ya trae la plantilla de ABP; `Microsoft.Data.SqlClient` (ADO.NET, sin Dapper); `Microsoft.SqlServer.TransactSql.ScriptDom` (validar y analizar T-SQL); `DocumentFormat.OpenXml` (Word/Excel) | Dapper, ClosedXML, generadores de PDF de terceros |
 | .NET cliente WASM | Lo que ya trae ABP + `Reporting.Core` | Paquetes de componentes de terceros (se usa la librería corporativa) |
 | Solo desarrollo y CI | Node (scripts de build sin paquetes, como `build-rptlib.mjs`); runner de tests JS (`node:test`, o Vitest + jsdom si hace falta DOM); xUnit y bUnit; Playwright para e2e | — |
@@ -137,10 +138,10 @@ Cualquier dependencia nueva requiere un ADR breve: motivo, alternativa propia de
 
 ### 2.8 Estilos de las pantallas
 
-- Las pantallas Blazor replican **tal cual** la organización y los estilos del prototipo (`src/styles.css`, estructura de `Designer.jsx`, `ReportEditor.jsx`…).
-- Donde ya existe un control corporativo maquetado para lo mismo (botones, pestañas, diálogos, tablas, formularios…), se usa ese control.
-- Lo que no existe en la librería corporativa se porta desde `styles.css` a CSS aislado de Blazor (`*.razor.css`) o a una hoja con prefijo propio (`rpt-app-`), sin tocar la librería corporativa.
-- Se mantiene una lista de «estilos portados pendientes de revisión» que se resuelve en la Fase 14.
+- `src/styles.css` se copia **literal** como hoja global del módulo (`_content/Xxx.Reporting.Blazor/rpt-app.css`). Para que no choque con la librería corporativa, sus reglas se acotan a un contenedor raíz (`.rpt-app …`) de forma mecánica, sin cambiar valores, y se fijan sus variables en ese contenedor. No se reescriben en `*.razor.css`: así el resultado es idéntico y las diferencias con el prototipo se ven con un `diff`.
+- Los componentes Razor generan **el mismo marcado** que los JSX (ver 2.10), así que esa hoja aplica sin cambios.
+- Donde ya existe un control corporativo maquetado **para exactamente lo mismo** (botones, pestañas, diálogos, campos de formulario…), se usa ese control, siempre que no cambie el comportamiento ni la organización de la pantalla.
+- Se mantiene una lista de «estilos del prototipo pendientes de revisión» que se resuelve en la Fase 14.
 - Los **informes** (lo que pinta la librería en el iframe) tienen su propio tema (Fase 1); no dependen de la librería corporativa.
 
 ### 2.9 Estructura de la solución
@@ -165,6 +166,24 @@ test/
 
 Si el producto ya tiene un módulo de informes, se adapta a sus proyectos.
 
+### 2.10 Paridad con el prototipo
+
+El diseñador y el resto de componentes (asistente, editor, orígenes de datos, editor visual de consultas, editor SQL, modelo semántico, Show Me, panel de propiedades, temas, historial y comparación, visor, barra de parámetros, marcadores, listado) deben quedar **tal cual el prototipo**: mismo aspecto, misma organización, mismo comportamiento y mismas funciones. Cambiar de React a Blazor es un detalle de implementación que el usuario no debe notar.
+
+**Cómo se consigue**
+
+1. **Port 1:1 de cada componente**: un componente Razor por cada componente JSX (`Designer.jsx` → `Designer.razor`…), con los mismos elementos HTML, clases CSS, atributos `aria-*`/`role`, textos, iconos (los trazados SVG de `Icon.jsx` copiados tal cual) y orden. Cada `useState`/`useEffect` se traduce a estado y ciclo de vida de Blazor; cada manejador de eventos, a su equivalente (o a un módulo JS cuando Blazor no llega: puntero, arrastre, foco, portapapeles).
+2. **CSS literal** (2.8).
+3. **Mismos comportamientos finos**: atajos de teclado, foco, deshacer/rehacer, arrastre y redimensionado (ratón y táctil), «tocar para insertar», multiselección, menús emergentes que se cierran con `Esc` o clic fuera, avisos y mensajes, estados vacíos y de error, adaptación a móvil (pestañas paleta/lienzo/propiedades).
+4. **Mismas funciones**: todo lo que lista el README del prototipo está disponible en el producto **desde la fase que porta esa pantalla**; no se ocultan componentes de la paleta ni propiedades para reducir alcance.
+5. **Única diferencia permitida**: lo que el prototipo simula (datos de ejemplo, `localStorage`, alasql) se sustituye por lo real (API, SQL Server), y los controles corporativos ya maquetados para lo mismo (2.8).
+
+**Cómo se comprueba**
+
+- **Lista de paridad** (`docs/paridad.md`, Fase 0): una línea por funcionalidad del README del prototipo y por componente JSX, con la fase que la porta y su estado. Una fase no se cierra con elementos pendientes de su alcance.
+- **e2e portados con los mismos selectores**: como el marcado es el mismo, `e2e/app.spec.js`, `e2e/v3.spec.js` y `e2e/mobile.spec.js` se portan casi mecánicamente (cambia la navegación y los datos, no los selectores).
+- **Comparación visual lado a lado**: Playwright abre el prototipo (`npm run build` + `vite preview`) y el producto con el mismo fixture, en escritorio y móvil, y compara capturas de cada pantalla y estado relevante (paleta, lienzo con selección, panel de propiedades de cada tipo de componente, editor de consultas, historial…). Las diferencias aceptadas (controles corporativos) se registran.
+
 ---
 
 ## 3. Mapa prototipo → producto
@@ -181,13 +200,14 @@ Si el producto ya tiene un módulo de informes, se adapta a sus proyectos.
 | `reportData.js` (`buildFullData`, subinformes) | `Domain` → `ReportDataEngine` | **Portar** (Fase 4) |
 | `getSchema()` / `getRelations()` | Catálogo de datos (`sys.tables`, `sys.columns`, `sys.foreign_keys`) + lista blanca | **Reescribir** (Fase 4) |
 | `store.js` | Entidades ABP + app services + EF Core | **Reescribir** (la API de `store.js` es la lista de casos de uso) (Fase 3) |
-| `Designer.jsx`, `PropertyPanel.jsx`, `ShowMePanel.jsx`, `LiveComponent.jsx` | Componentes Blazor + `rptCanvas.js` + `rptLive.js` | **Reescribir en Blazor** manteniendo estructura y estilos (Fase 6) |
-| `QueryBuilder.jsx`, `SqlEditor.jsx`, `DataSourcesEditor.jsx` | Componentes Blazor + `rptQueryCanvas.js` + `rptSqlEditor.js` | **Reescribir en Blazor** (Fase 7) |
-| `SemanticEditor.jsx` | Componente Blazor | **Reescribir en Blazor** (Fase 11) |
-| `ReportFrame.jsx`, `ParamsBar.jsx`, `Viewer.jsx` | `ReportViewer`, `ReportParamsBar` + `reportBridge.js` | **Reescribir en Blazor** (Fase 5) |
+| `Designer.jsx`, `PropertyPanel.jsx`, `ShowMePanel.jsx`, `LiveComponent.jsx` | Componentes Blazor + `rptCanvas.js` + `rptLive.js` | **Portar 1:1 a Blazor** (Fase 6) |
+| `QueryBuilder.jsx`, `SqlEditor.jsx`, `DataSourcesEditor.jsx` | Componentes Blazor + `rptQueryCanvas.js` + `rptSqlEditor.js` (CodeMirror) | **Portar 1:1 a Blazor** (Fase 7) |
+| `SemanticEditor.jsx` | Componente Blazor | **Portar 1:1 a Blazor** (Fase 11) |
+| `ReportFrame.jsx`, `ParamsBar.jsx`, `Viewer.jsx` | `ReportViewer`, `ReportParamsBar` + `reportBridge.js` | **Portar 1:1 a Blazor** (Fase 5) |
 | `exporters.js` (docx/exceljs en el cliente) | Open XML SDK en servidor a partir de `collect()` | **Portar** la estructura (Fase 5) |
-| `ReportList.jsx`, `Wizard.jsx`, `ReportEditor.jsx`, `HistoryTab.jsx`, `HtmlTab.jsx` | Páginas Blazor existentes | **Rehacer** con la organización del prototipo (Fases 8 y 9) |
-| `src/styles.css` | Controles corporativos + CSS aislado de Blazor | **Replicar** (2.8) y revisar en la Fase 14 |
+| `ReportList.jsx`, `Wizard.jsx`, `ReportEditor.jsx`, `HistoryTab.jsx`, `HtmlTab.jsx` | Páginas Blazor existentes | **Rehacer** como en el prototipo, 1:1 (Fases 8 y 9) |
+| `src/styles.css` | Hoja global del módulo, copiada literal y acotada a `.rpt-app` | **Copiar** (2.8) y revisar en la Fase 14 |
+| `src/components/Icon.jsx` | Componente `Icon.razor` con los mismos trazados SVG | **Copiar** |
 | `tests/*.test.js` | xUnit (`Reporting.Core.Tests`, dominio) y tests JS de la librería | **Portar** |
 | `e2e/*.spec.js` | Playwright contra la aplicación Blazor | **Portar** |
 
@@ -226,7 +246,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
    - `Reporting.DataCatalog.Manage` (conexiones y tablas expuestas)
    - `Reporting.Dashboard` (personalizar el propio)
 
-**Entregables:** inventario y matriz de compatibilidad, mapa pantalla → controles corporativos, ADR, JSON Schemas, fixtures, permisos.
+**Entregables:** inventario y matriz de compatibilidad, mapa pantalla → controles corporativos, **lista de paridad** (`docs/paridad.md`, ver 2.10) y la prueba de comparación visual lado a lado preparada, ADR, JSON Schemas, fixtures, permisos.
 
 **Aceptación:** las plantillas del prototipo validan contra los JSON Schemas; se sabe qué informes existentes llevan el código pegado sin modificar.
 
@@ -364,7 +384,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 9. Usar el visor en el **listado** y en el **dashboard actual** desde ya, para validarlo con usuarios reales.
 10. Tests bUnit y e2e Playwright (escenarios de lectura de `e2e/app.spec.js`: filtros, filtro cruzado, ver datos, exportar).
 
-**Aceptación:** un informe migrado (manual) y una plantilla del prototipo se ven en el listado y en el dashboard con parámetros, filtros, marcadores y exportación a PDF/Word/Excel/CSV; el iframe no puede acceder a la sesión; no se añade ninguna librería JS de terceros.
+**Aceptación:** un informe migrado (manual) y una plantilla del prototipo se ven en el listado y en el dashboard con parámetros, filtros, marcadores y exportación a PDF/Word/Excel/CSV; el iframe no puede acceder a la sesión; el visor es igual que el del prototipo (comparación visual, 2.10).
 
 ---
 
@@ -382,10 +402,11 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 4. `rptLive.js`: carga la librería de la versión del informe en la página de la aplicación y pinta cada celda con `RptLib.renderComponent(el, type, props, source, { interactive: false, … })` y los datos de la vista previa. Es código propio y las props se escapan en la librería; si se prefiere aislar, pintar el lienzo dentro de un iframe del mismo origen.
 5. **Panel de propiedades** generado desde el catálogo de `Reporting.Core` (tipos de control, `when`, campos compatibles según tipo, medidas y jerarquías), con controles corporativos donde existan.
 6. Atajos de teclado (`Supr`, `Ctrl+Z/Y`, `Ctrl+C/V`, `Ctrl+A`, flechas), vista por dispositivo, diseño automático, bloques reutilizables (`ReportBlock`), tema (marca, paleta, densidad, claro/oscuro, logotipo, importar/exportar tema JSON), Show Me, avisos de vínculos rotos, multipágina.
-7. Estilos: replicar `styles.css` en CSS aislado (`*.razor.css`) para lo que no tenga control corporativo; anotar cada caso en la lista de revisión de la Fase 14.
-8. Tests bUnit (panel de propiedades, atajos, deshacer) y e2e Playwright portando los escenarios de diseño de `e2e/app.spec.js` y `e2e/mobile.spec.js`.
+7. **Toda la paleta y todas las propiedades del catálogo** desde esta fase (texto, filtros, losetas, KPI, gauge, gráficos, dispersión, tablas, tabla dinámica, mapa, cascada, embudo, treemap, calendario, bullet, Sankey, narrativa, subinforme…), con las mismas opciones del panel que en el prototipo.
+8. Estilos y marcado según 2.8 y 2.10; los controles corporativos usados se anotan en la lista de revisión de la Fase 14.
+9. Tests bUnit (panel de propiedades, atajos, deshacer), e2e Playwright portando los escenarios de diseño de `e2e/app.spec.js` y `e2e/mobile.spec.js`, y comparación visual con el prototipo (2.10).
 
-**Aceptación:** se puede reproducir en Blazor el diseño de las plantillas del prototipo con ratón, teclado y táctil; no hay librerías JS de terceros; la lógica de modelo está en C# y tiene tests.
+**Aceptación:** el diseñador es indistinguible del del prototipo (comparación visual y e2e portados en verde); las plantillas se reproducen con ratón, teclado y táctil; la lógica de modelo está en C# y tiene tests.
 
 ---
 
@@ -400,7 +421,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 1. **Editor visual** (Blazor + `rptQueryCanvas.js`): arrastrar tablas del catálogo al lienzo, uniones automáticas por las **FK reales** (`sys.foreign_keys`) y uniones manuales con dos clics en los conectores, columnas con función de fecha, agregación, alias y orden, filtros por valor o por parámetro (opcionales «ignorar si vacío»), `DISTINCT` y límite. El T-SQL de solo lectura se genera **en el cliente** con `Reporting.Core` (al momento) y el servidor lo regenera al guardar y al ejecutar.
 2. **T-SQL → visual** en servidor (`POST /api/app/query/parse`): portar `sqlToBuilder()` sobre el árbol de ScriptDom; devuelve el `builder` o el motivo de no soportado (expresiones, `CASE`, `OR`, `HAVING`, subconsultas, `RIGHT JOIN`, orígenes derivados…). Comprobación de equivalencia ejecutando ambas consultas con `TOP (n)` y comparando, como el prototipo.
 3. Fixtures: los casos de `tests/sqlToBuilder.test.js` reescritos en T-SQL para xUnit.
-4. **Editor SQL ligero** (`rptSqlEditor.js` + Blazor): `textarea` con capa de resaltado (palabras clave, cadenas, números, comentarios, `@parámetros`), números de línea, lista de autocompletado de tablas/columnas del catálogo y `origen.<id>` (sugerencias calculadas en C#), y validación en servidor con *debounce* mostrando el error de ScriptDom en su línea. Si con el tiempo se queda corto, valorar CodeMirror con un ADR (2.7).
+4. **Editor SQL igual que el del prototipo**: CodeMirror 6 con la configuración de `SqlEditor.jsx` (`basicSetup`, `lang-sql` con dialecto `MSSQL`, `Mod-Enter` para ejecutar, autocompletado de tablas, columnas del catálogo y `origen.<id>`, inserción de fragmentos de `QUERY_SNIPPETS`), envuelto en `rptSqlEditor.js` y un componente Blazor. Además, validación en servidor con *debounce* mostrando el error de ScriptDom.
 5. **Gestión de orígenes**: crear (visual/SQL), duplicar, renombrar actualizando componentes y relaciones semánticas, elegir conexión, vista previa con tiempo de ejecución (`preview-source`), edición de campos (etiqueta, tipo, formato) y campos calculados.
 6. **Editor de parámetros**: todos los tipos de la Fase 4, valores por defecto, lista estática o desde consulta, periodos predefinidos.
 7. Permisos en la UI: sin `EditSql` solo editor visual (el SQL generado se ve en solo lectura); con él, se puede pasar a SQL manual.
@@ -477,7 +498,7 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 1. Pestaña **Modelo** en Blazor: relaciones con sugerencias, medidas con validación en vivo, jerarquías, selección asociativa. Portar el analizador de medidas de `10-semantic.js` a `Reporting.Core` (validación en cliente y en servidor); la evaluación sigue en la librería.
 2. **Multipágina** y filtros de informe (sincronizados o por página).
 3. **Paginados**: diseño de página (tamaño, orientación, márgenes, encabezado, pie, numeración, fecha), saltos de página, tablas agrupadas con subtotales, subinformes (motor ya en la Fase 4).
-4. Visualizaciones y analítica de la librería (comparación temporal, líneas de referencia, previsión, anomalías, narrativa, mapa, cascada, embudo, treemap, calendario, bullet, Sankey, múltiplos pequeños) visibles en la paleta y el panel de propiedades. Si se ocultaron antes para reducir alcance, se activan aquí.
+4. Comprobar de punta a punta la analítica de la librería (comparación temporal, líneas de referencia, previsión, anomalías, narrativa, múltiplos pequeños) con medidas y jerarquías del modelo; la paleta y el panel ya están completos desde la Fase 6.
 5. e2e: portar `e2e/v3.spec.js`.
 
 **Aceptación:** la plantilla *Ventas 2025* del prototipo (3 páginas, modelo semántico, profundizar, comparación interanual, previsión, mapa, Sankey y tabla agrupada) se crea, guarda, publica y ve con el mismo resultado.
@@ -516,11 +537,11 @@ Cada fase indica objetivo, referencia en el prototipo, tareas, entregables y cri
 
 ### Fase 14 · Revisión visual con la librería corporativa
 
-**Objetivo:** alinear con la librería corporativa lo que se portó tal cual desde el prototipo.
+**Objetivo:** alinear con la librería corporativa lo que se portó tal cual desde el prototipo. Es una revisión **visual**: no cambia la organización de las pantallas ni el comportamiento ni las funciones.
 
 **Tareas**
 
-1. Recorrer la lista de «estilos portados pendientes de revisión» (2.8) pantalla a pantalla: listado, asistente, editor (diseño, orígenes, consultas, modelo, HTML, historial), visor y dashboard.
+1. Recorrer la lista de «estilos del prototipo pendientes de revisión» (2.8) pantalla a pantalla: listado, asistente, editor (diseño, orígenes, consultas, modelo, HTML, historial), visor y dashboard.
 2. Para cada caso: sustituir por un control corporativo existente, proponer un control nuevo a la librería corporativa (paleta de componentes, lienzo, editor de consultas, panel de propiedades…) o mantener el estilo propio documentado.
 3. Eliminar CSS portado que quede sin uso; unificar tokens (colores, espaciado, tipografía) con los corporativos.
 4. Revisar el tema de los informes (librería en el iframe) frente a la identidad corporativa y, si procede, publicar una versión de la librería con los nuevos tokens (sin cambiar los informes existentes, que siguen en su versión).
@@ -561,8 +582,9 @@ Fase 0 ─┬─► Fase 1 (librería: 1A ya, 1B después)
 | Informes existentes con el código pegado y **editado a mano** | Detección por hash; esos informes no se migran automáticamente y se marcan «Revisar». |
 | Diferencias entre el código existente y RptLib (marcado, API) | Matriz de compatibilidad (Fase 0), `0.9.0` intacta para los existentes y `05-compat.js` para facilitar el paso a `1.0.0`. |
 | Diferencias entre alasql (prototipo) y T-SQL | Generación y análisis en T-SQL con fixtures; BD de pruebas con `sampledb.json` para comparar resultados. |
-| Reescribir en Blazor la interacción del diseñador (arrastre, táctil, redimensionado) | Toda la lógica en C# probada; el JS se limita a eventos de puntero; portar los e2e del prototipo (escritorio y móvil) desde el principio. |
-| Editor SQL propio menos potente que CodeMirror | Alcance acotado (resaltado, autocompletado, errores); CodeMirror como opción con ADR si se queda corto. |
+| Portar a Blazor la interacción del diseñador (arrastre, táctil, redimensionado) | Toda la lógica en C# probada; el JS de puntero se porta del de `Designer.jsx`; e2e del prototipo (escritorio y móvil) portados desde el principio. |
+| Divergencias entre el prototipo y el port a Blazor | Port 1:1 de marcado y CSS literal, lista de paridad, e2e con los mismos selectores y comparación visual lado a lado en CI (2.10). |
+| CodeMirror como dependencia | Versión fija empaquetada en local (sin CDN), envuelta en un único módulo para poder cambiarla sin tocar el resto. |
 | Tamaño de la descarga WASM | `Reporting.Core` sin dependencias; ScriptDom y Open XML solo en servidor; carga diferida del ensamblado del diseñador. |
 | Seguridad del SQL libre | `EditSql`, ScriptDom, lista blanca, usuario de solo lectura, timeout y límites, auditoría. |
 | Iframe sin `allow-same-origin` y autenticación | Datos inyectados con token de un solo uso; nunca relajar el sandbox. |
@@ -578,6 +600,7 @@ Fase 0 ─┬─► Fase 1 (librería: 1A ya, 1B después)
 - Ninguna dependencia nueva fuera de la [política](#27-política-de-dependencias) sin ADR.
 - Textos localizados (ABP en .NET/Blazor; diccionarios en la librería).
 - Accesible con teclado y lector de pantalla en lo nuevo; funciona en escritorio y móvil.
-- Estilos: controles corporativos donde existan; lo portado anotado en la lista de revisión de la Fase 14.
+- **Paridad con el prototipo** (2.10): lista de paridad al día, e2e portados y comparación visual sin diferencias no registradas.
+- Estilos: controles corporativos solo donde ya existan para lo mismo; anotados en la lista de revisión de la Fase 14.
 - Documentación actualizada (este plan, README de `client/rptlib`, ADR).
 - Sin regresiones en los informes existentes.

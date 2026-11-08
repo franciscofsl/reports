@@ -133,7 +133,7 @@ Lo que necesita dependencias pesadas o acceso a datos (ScriptDom, ADO.NET, Open 
 `/_content/Fundanet.Arco.Blazor/arco-analytics/<versión>/arco-analytics.{css,js}` con `Cache-Control: public, max-age=31536000, immutable`. Cada informe apunta a su versión (`model.libVersion`); publicar una versión nueva no cambia los informes existentes.
 
 - **Todas las versiones de la librería viajan en cada versión del paquete** Blazor de `Fundanet.Arco`: una aplicación que actualiza el NuGet sigue sirviendo las versiones que usan sus informes antiguos. CI comprueba que las carpetas de versiones ya publicadas no cambian (hashes del `manifest.json`).
-- **El HTML guardado no lleva la URL física.** Referencia la librería de forma lógica (`arco-analytics:<versión>/arco-analytics.css`) y el endpoint de renderizado, la vista previa y la descarga la resuelven con `ArcoAnalyticsOptions.LibraryBaseUrl` (por defecto la ruta `_content` de arriba, respetando el `PathBase` de la aplicación; se puede apuntar a un CDN). Así el mismo informe funciona en cualquier aplicación que consuma el módulo.
+- **El HTML guardado no lleva la URL física.** Referencia la librería de forma lógica (`arco-analytics:<versión>/arco-analytics.css`) y el endpoint de renderizado, la vista previa y la descarga la resuelven con `ArcoAnalyticsOptions.LibraryBaseUrl` (por defecto la ruta `_content` de arriba, respetando el `PathBase` de la aplicación; se puede apuntar a un CDN). Así el mismo informe funciona en cualquier aplicación que use Arco.
 
 ### 2.6 Aislamiento del informe
 

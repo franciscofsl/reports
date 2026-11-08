@@ -1,5 +1,6 @@
 // Operaciones puras sobre el modelo de diseño { title, subtitle, rows: [{ id, cells: [cell] }] }.
 import { uid } from './catalog.js';
+import { allRows, modelPages } from './htmlGenerator.js';
 
 const clone = (m) => structuredClone(m);
 const rowSpan = (row) => row.cells.reduce((a, c) => a + (c.span || 12), 0);
@@ -120,24 +121,41 @@ export function removeRow(model, index) {
 /** Cuenta cuántos componentes usan cada origen de datos. */
 export function sourceUsage(model) {
   const u = {};
-  for (const r of model?.rows || []) for (const c of r.cells) if (c.source) u[c.source] = (u[c.source] || 0) + 1;
+  for (const r of allRows(model)) for (const c of r.cells) if (c.source) u[c.source] = (u[c.source] || 0) + 1;
+  for (const f of model?.reportFilters || []) if (f.source) u[f.source] = (u[f.source] || 0) + 1;
   return u;
 }
 
 /** Problemas de vinculación (para avisar antes de guardar). */
-export function validateModel(model, dataSources) {
+export function validateModel(model, dataSources, semantic = {}) {
   const issues = [];
   const ids = new Set(dataSources.map((d) => d.id));
-  for (const r of model?.rows || []) {
+  const measures = new Map((semantic?.measures || []).map((m) => [`m:${m.name}`, m]));
+  const hierarchies = new Map((semantic?.hierarchies || []).map((h) => [`h:${h.name}`, h]));
+  const name = (c) => c.props.title || c.props.label || c.props.text || c.type;
+  for (const r of allRows(model)) {
     for (const c of r.cells) {
-      if (c.source && !ids.has(c.source)) issues.push({ cellId: c.id, msg: `«${c.props.title || c.props.label || c.type}» usa el origen inexistente «${c.source}»` });
+      if (c.source && !ids.has(c.source)) issues.push({ cellId: c.id, msg: `«${name(c)}» usa el origen inexistente «${c.source}»` });
       const ds = dataSources.find((d) => d.id === c.source);
       if (!ds) continue;
       const names = new Set((ds.fields || []).map((f) => f.name));
       const pr = c.props;
-      const used = [pr.field, pr.category, pr.targetField, pr.sortBy, pr.trendField, pr.x, pr.y, pr.size, c.type === 'scatter' ? pr.color : null, c.type === 'scatter' ? pr.label : null, pr.rows, pr.cols, pr.value, pr.filterField,
-        ...(pr.values || []), ...(pr.columns || []), ...(pr.databars || []), ...(pr.rules || []).map((r) => r.field)].filter(Boolean);
-      for (const f of used) if (!names.has(f)) issues.push({ cellId: c.id, msg: `«${c.props.title || c.props.label || c.type}» usa el campo «${f}», que no existe en «${ds.id}»` });
+      const used = [pr.field, pr.category, pr.targetField, pr.sortBy, pr.trendField, pr.dateField, pr.timeField, pr.splitBy, pr.group, pr.x, pr.y, pr.size, c.type === 'scatter' ? pr.color : null, c.type === 'scatter' ? pr.label : null, pr.rows, pr.cols, pr.value, pr.filterField,
+        ...(pr.values || []), ...(pr.columns || []), ...(pr.databars || []), ...(pr.levels || []), ...(pr.groupBy || []), ...(pr.rules || []).map((x) => x.field),
+        ...(pr.sparklines || []).flatMap((x) => (x.source ? [x.key] : [x.key, x.time, x.value]))].filter(Boolean);
+      for (const sp of (pr.sparklines || []).filter((x) => x.source)) {
+        const other = dataSources.find((d) => d.id === sp.source);
+        if (!other) { issues.push({ cellId: c.id, msg: `«${name(c)}» toma la tendencia del origen inexistente «${sp.source}»` }); continue; }
+        for (const f of [sp.key, sp.time, sp.value]) if (f && !(other.fields || []).some((x) => x.name === f)) issues.push({ cellId: c.id, msg: `«${name(c)}»: la tendencia usa «${f}», que no existe en «${other.id}»` });
+      }
+      for (const f of used) {
+        if (names.has(f)) continue;
+        const m = measures.get(f);
+        if (m && (!m.source || m.source === ds.id)) continue;
+        const h = hierarchies.get(f);
+        if (h && (!h.source || h.source === ds.id)) continue;
+        issues.push({ cellId: c.id, msg: `«${name(c)}» usa ${f.startsWith('m:') ? 'la medida' : f.startsWith('h:') ? 'la jerarquía' : 'el campo'} «${f.replace(/^[mh]:/, '')}», que no existe en «${ds.id}»` });
+      }
     }
   }
   return issues;
@@ -146,7 +164,36 @@ export function validateModel(model, dataSources) {
 /** Propaga el renombrado de un origen a todos los componentes que lo usan. */
 export function renameSource(model, from, to) {
   if (!model) return model;
-  return { ...model, rows: model.rows.map((r) => ({ ...r, cells: r.cells.map((c) => (c.source === from ? { ...c, source: to } : c)) })) };
+  const fix = (rows) => rows.map((r) => ({ ...r, cells: r.cells.map((c) => (c.source === from ? { ...c, source: to } : c)) }));
+  const next = { ...model };
+  if (model.pages) next.pages = model.pages.map((p) => ({ ...p, rows: fix(p.rows) }));
+  if (model.rows) next.rows = fix(model.rows);
+  if (model.reportFilters) next.reportFilters = model.reportFilters.map((f) => (f.source === from ? { ...f, source: to } : f));
+  return next;
+}
+
+/** Propaga el renombrado de un origen al modelo semántico. */
+export function renameSourceInSemantic(sem, from, to) {
+  if (!sem) return sem;
+  const r = (s) => (s === from ? to : s);
+  return {
+    ...sem,
+    relations: (sem.relations || []).map((x) => ({ ...x, from: { ...x.from, source: r(x.from.source) }, to: { ...x.to, source: r(x.to.source) } })),
+    measures: (sem.measures || []).map((m) => ({ ...m, source: m.source ? r(m.source) : m.source })),
+    hierarchies: (sem.hierarchies || []).map((h) => ({ ...h, source: h.source ? r(h.source) : h.source })),
+  };
+}
+
+/** Modelo de una página concreta para reutilizar las operaciones de filas. */
+export function pageModel(model, pageIndex) {
+  const pages = modelPages(model);
+  return { ...model, rows: pages[Math.min(pageIndex, pages.length - 1)].rows };
+}
+/** Escribe las filas editadas de una página en el modelo (convierte a multipágina si hace falta). */
+export function withPageRows(model, pageIndex, rows) {
+  const pages = modelPages(model).map((p, i) => (i === pageIndex ? { ...p, rows } : p));
+  const { rows: _r, ...rest } = model;
+  return { ...rest, pages };
 }
 
 export function removeCells(model, ids) {

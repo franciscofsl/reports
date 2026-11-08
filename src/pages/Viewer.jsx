@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import ReportFrame from '../components/ReportFrame.jsx';
+import ReportFrame, { decodeView } from '../components/ReportFrame.jsx';
 import Icon from '../components/Icon.jsx';
 import { generateHtml } from '../lib/htmlGenerator.js';
 import { getPublished, getReport, listVersions } from '../lib/store.js';
@@ -7,9 +7,10 @@ import { getPublished, getReport, listVersions } from '../lib/store.js';
 const fmtDate = (d) => new Intl.DateTimeFormat('es-ES', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(d));
 
 /** Visor de lectura: muestra la versión publicada (lo que se comparte con los lectores). */
-export default function Viewer({ id, go }) {
+export default function Viewer({ id, go, query }) {
   const [copied, setCopied] = useState(false);
   const pub = useMemo(() => getPublished(id), [id]);
+  const shared = useMemo(() => { const v = new URLSearchParams(query || '').get('v'); return v ? decodeView(v) : null; }, [query]);
   const report = getReport(id);
   const fallback = !pub && report ? listVersions(id)[0] : null;
   const v = pub?.version || fallback;
@@ -33,7 +34,8 @@ export default function Viewer({ id, go }) {
           <button className="ui-btn ui-btn-subtle" type="button" onClick={() => go(`#/report/${id}/design`)}><Icon name="edit" size={16} />Editar</button>
         </span>
       </div>
-      <ReportFrame key={v.id} html={html} dataSources={v.dataSources || []} params={v.params || []} height="calc(100vh - 170px)" devices={false} />
+      <ReportFrame key={v.id} html={html} dataSources={v.dataSources || []} params={v.params || []} semantic={v.semantic} model={v.model} reportId={id} reportName={report.name} brand={v.model?.theme?.brand}
+        initialState={shared?.s || null} initialParams={shared?.p || null} height="calc(100vh - 170px)" devices={false} />
     </div>
   );
 }

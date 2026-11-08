@@ -1,10 +1,31 @@
 // Conversión modelo de diseño <-> HTML del informe, e inyección de datos para la vista previa.
-export const LIB_VERSION = '1.1.0';
+export const LIB_VERSION = '1.2.0';
 /** Versiones publicadas (inmutables). Los informes antiguos siguen apuntando a la suya. */
 export const LIB_VERSIONS = [
-  { value: '1.1.0', label: '1.1.0 (actual): filtros, nuevos componentes, temas' },
+  { value: '1.2.0', label: '1.2.0 (actual): modelo semántico, páginas, analítica, nuevas visualizaciones' },
+  { value: '1.1.0', label: '1.1.0: filtros, nuevos componentes, temas' },
   { value: '1.0.0', label: '1.0.0' },
 ];
+
+/** Páginas del modelo (los modelos antiguos tienen una sola lista de filas). */
+export function modelPages(model) {
+  if (model?.pages?.length) return model.pages;
+  return [{ id: 'p1', name: 'Página 1', rows: model?.rows || [] }];
+}
+export const allRows = (model) => modelPages(model).flatMap((p) => p.rows || []);
+
+const cssStr = (v) => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]+/g, ' ')}"`;
+/** CSS de página para impresión/PDF: tamaño, márgenes, encabezado, pie y numeración. */
+export function paperCss(paper) {
+  if (!paper) return '';
+  const boxes = [];
+  if (paper.header) boxes.push(`@top-left { content: ${cssStr(paper.header)}; font: 9pt sans-serif; color: #555; }`);
+  if (paper.footer) boxes.push(`@bottom-left { content: ${cssStr(paper.footer)}; font: 9pt sans-serif; color: #555; }`);
+  if (paper.pageNumbers !== false) boxes.push('@bottom-right { content: "Página " counter(page) " de " counter(pages); font: 9pt sans-serif; color: #555; }');
+  const size = `${paper.size || 'A4'} ${paper.orientation === 'landscape' ? 'landscape' : 'portrait'}`;
+  const m = Math.max(5, Math.min(40, Number(paper.margin) || 15));
+  return `@page { size: ${size}; margin: ${m}mm; ${boxes.join(' ')} }`;
+}
 export const GENERATOR = 'RptDesigner/0.1';
 
 /** URL absoluta de la librería publicada como estático de la app (CDN propio). */
@@ -33,29 +54,37 @@ export function generateHtml(report) {
   const model = report.model || { rows: [] };
   const lib = libBaseUrl(model.libVersion || LIB_VERSION);
   const theme = model.theme || {};
-  const rows = (model.rows || [])
-    .filter((r) => r.cells.length)
-    .map((row) => {
-      const cells = row.cells
-        .map((c) => {
-          const src = c.source ? ` data-source="${escHtml(c.source)}"` : '';
-          const style = c.height ? ` style="min-height:${Number(c.height)}px"` : '';
-          return `      <div class="rpt-col rpt-col-${c.span || 12}" data-rpt="${escHtml(c.type)}"${src}${style} data-props='${escAttrSingle(JSON.stringify(cleanProps(c.props)))}'></div>`;
-        })
-        .join('\n');
-      return `    <section class="rpt-row">\n${cells}\n    </section>`;
-    })
-    .join('\n');
+  const pages = modelPages(model);
+  const cellHtml = (c, ind) => {
+    const src = c.source ? ` data-source="${escHtml(c.source)}"` : '';
+    const style = c.height ? ` style="min-height:${Number(c.height)}px"` : '';
+    return `${ind}<div class="rpt-col rpt-col-${c.span || 12}" data-rpt="${escHtml(c.type)}"${src}${style} data-props='${escAttrSingle(JSON.stringify(cleanProps(c.props)))}'></div>`;
+  };
+  const rowsHtml = (rows, ind) => rows.filter((r) => r.cells.length)
+    .map((row) => `${ind}<section class="rpt-row">\n${row.cells.map((c) => cellHtml(c, `${ind}  `)).join('\n')}\n${ind}</section>`).join('\n');
+  const body = pages.length > 1
+    ? pages.map((pg) => `    <section class="rpt-page" data-page="${escHtml(pg.id)}" data-title="${escHtml(pg.name)}">\n${rowsHtml(pg.rows, '      ')}\n    </section>`).join('\n')
+    : rowsHtml(pages[0].rows, '    ');
 
-  const layout = { libVersion: model.libVersion || LIB_VERSION, title: model.title, subtitle: model.subtitle, theme: model.theme, rows: model.rows };
+  const layout = { libVersion: model.libVersion || LIB_VERSION, title: model.title, subtitle: model.subtitle, theme: model.theme, pages: model.pages, rows: model.pages ? undefined : model.rows, reportFilters: model.reportFilters, paper: model.paper };
+  const styleVars = [
+    theme.brand && /^#[0-9a-f]{6}$/i.test(theme.brand) && theme.brand.toLowerCase() !== '#0f6cbd' ? `--rpt-brand:${theme.brand}` : '',
+    theme.background && /^#[0-9a-f]{6}$/i.test(theme.background) ? `--rpt-bg:${theme.background}` : '',
+  ].filter(Boolean).join(';');
   const htmlAttrs = [
     'lang="es-ES"',
     theme.mode && theme.mode !== 'auto' ? `data-rpt-theme="${escHtml(theme.mode)}"` : '',
-    theme.palette && theme.palette !== 'fluent' ? `data-rpt-palette="${escHtml(theme.palette)}"` : '',
+    theme.palette && theme.palette !== 'fluent' && theme.palette !== 'custom' ? `data-rpt-palette="${escHtml(theme.palette)}"` : '',
     theme.density && theme.density !== 'normal' ? `data-rpt-density="${escHtml(theme.density)}"` : '',
-    theme.brand && /^#[0-9a-f]{6}$/i.test(theme.brand) && theme.brand.toLowerCase() !== '#0f6cbd' ? `style="--rpt-brand:${theme.brand}"` : '',
+    styleVars ? `style="${styleVars}"` : '',
   ].filter(Boolean).join(' ');
+  const themeMeta = (theme.palette === 'custom' && theme.colors?.length) || theme.font
+    ? `\n  <meta name="rpt-theme" content='${escAttrSingle(JSON.stringify({ colors: theme.palette === 'custom' ? theme.colors : undefined, font: theme.font || undefined }))}'>` : '';
+  const paper = model.paper ? `\n  <meta name="rpt-paper" content='${escAttrSingle(JSON.stringify({ showDate: !!model.paper.showDate }))}'>\n  <style media="print">${paperCss(model.paper)}</style>` : '';
   const logo = theme.logo && /^(https?:|data:image\/)/.test(theme.logo) ? `\n      <img class="rpt-logo" src="${escHtml(theme.logo)}" alt="Logotipo">` : '';
+  const filtersAttr = model.reportFilters?.length ? ` data-rpt-filters='${escAttrSingle(JSON.stringify(model.reportFilters))}'` : '';
+  const sem = report.semantic && (report.semantic.measures?.length || report.semantic.relations?.length || report.semantic.hierarchies?.length || report.semantic.associative)
+    ? `\n  <script type="application/json" id="rpt-semantic">${safeJson(report.semantic)}</script>` : '';
 
   return `<!doctype html>
 <html ${htmlAttrs}>
@@ -63,21 +92,21 @@ export function generateHtml(report) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="generator" content="${GENERATOR}">
-  <title>${escHtml(model.title || report.name)}</title>
+  <title>${escHtml(model.title || report.name)}</title>${themeMeta}${paper}
   <link rel="stylesheet" href="${lib}rptlib.css">
   <script src="${lib}rptlib.js" defer></script>
 </head>
 <body class="rpt-body">
-  <main class="rpt-report">
+  <main class="rpt-report"${filtersAttr}>
     <header class="rpt-report-header">
       <div>
         <h1>${escHtml(model.title || report.name)}</h1>${model.subtitle ? `\n        <p>${escHtml(model.subtitle)}</p>` : ''}
       </div>${logo}
     </header>
-${rows}
+${body}
   </main>
   <!-- Modelo del diseñador: permite volver a abrir este HTML en el editor visual. -->
-  <script type="application/json" id="rpt-model">${safeJson(layout)}</script>
+  <script type="application/json" id="rpt-model">${safeJson(layout)}</script>${sem}
 </body>
 </html>
 `;
@@ -90,7 +119,7 @@ export function parseModelFromHtml(html) {
     const s = doc.getElementById('rpt-model');
     if (!s) return null;
     const m = JSON.parse(s.textContent);
-    return m && Array.isArray(m.rows) ? m : null;
+    return m && (Array.isArray(m.rows) || Array.isArray(m.pages)) ? m : null;
   } catch {
     return null;
   }

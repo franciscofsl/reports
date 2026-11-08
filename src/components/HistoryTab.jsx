@@ -20,6 +20,7 @@ function DiffView({ a, b }) {
     <div className="diff">
       {d.empty && <p className="ui-hint">No hay diferencias de contenido entre v{a.n} y v{b.n}.</p>}
       <DiffList title="General" items={d.general} />
+      <DiffList title="Modelo semántico" items={d.semantic || []} render={(x) => <code>{x}</code>} />
       <DiffList title="Componentes añadidos" items={d.components.added} render={(c) => <><span className="diff-add">+</span> {c.name} <small>(fila.posición {c.pos})</small></>} />
       <DiffList title="Componentes eliminados" items={d.components.removed} render={(c) => <><span className="diff-del">−</span> {c.name}</>} />
       <DiffList title="Componentes modificados" items={d.components.changed} render={(c) => <><b>{c.name}</b><ul>{c.changes.map((x, i) => <li key={i}><code>{x}</code></li>)}</ul></>} />
@@ -120,7 +121,7 @@ export default function HistoryTab({ report, dirty, onRestored, onPublished }) {
       {preview && (
         <div className="ui-card">
           <div className="ui-card-head"><h3>Vista previa de v{preview.n}</h3><button className="ui-icon-btn" type="button" onClick={() => setPreview(null)} aria-label="Cerrar"><Icon name="close" /></button></div>
-          <ReportFrame html={htmlOf(preview)} dataSources={preview.dataSources || []} params={preview.params || []} height="60vh" />
+          <ReportFrame html={htmlOf(preview)} dataSources={preview.dataSources || []} params={preview.params || []} semantic={preview.semantic} model={preview.model} reportName={`${report.name}-v${preview.n}`} height="60vh" />
         </div>
       )}
     </div>

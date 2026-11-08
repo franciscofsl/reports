@@ -63,13 +63,13 @@ describe('plantillas', () => {
       expect(errors).toEqual({});
       for (const d of tpl.dataSources) expect(data.sources[d.id].rows.length).toBeGreaterThan(0);
       const withFields = tpl.dataSources.map((d) => ({ ...d, fields: data.sources[d.id].fields }));
-      expect(ops.validateModel(tpl.model, withFields)).toEqual([]);
+      expect(ops.validateModel(tpl.model, withFields, tpl.semantic)).toEqual([]);
     });
   }
 });
 
 describe('modelOps', () => {
-  const base = () => salesTemplate().model;
+  const base = () => ops.pageModel(salesTemplate().model, 0);
   it('mueve, duplica y elimina celdas', () => {
     let m = base();
     const id = m.rows[1].cells[0].id;
@@ -81,7 +81,7 @@ describe('modelOps', () => {
   });
   it('coloca varias celdas en una fila con el mismo ancho', () => {
     const m = base();
-    const ids = [m.rows[2].cells[0].id, m.rows[3].cells[1].id, m.rows[4].cells[0].id];
+    const ids = [m.rows[1].cells[0].id, m.rows[2].cells[1].id, m.rows[3].cells[0].id];
     const r = ops.arrangeInRow(m, ids);
     const row = r.rows.find((x) => x.cells.some((c) => c.id === ids[0]));
     expect(row.cells.map((c) => c.id)).toEqual(ids);
@@ -123,13 +123,18 @@ describe('htmlGenerator', () => {
     t.model.theme = { brand: '#8764b8', palette: 'ocean', density: 'compact', mode: 'dark', logo: '' };
     const html = generateHtml({ name: 'Ventas', ...t });
     expect(html).not.toMatch(/SELECT\s[\s\S]*\sFROM\s/);
-    expect(html).toContain('lib/rptlib/1.1.0/rptlib.js');
+    expect(html).toContain('lib/rptlib/1.2.0/rptlib.js');
+    expect(html).toContain('class="rpt-page" data-page="analisis"');
+    expect(html).toContain('data-rpt-filters=');
+    expect(html).toContain('@page { size: A4 landscape');
+    expect(html).toContain('counter(pages)');
+    expect(html).toContain('id="rpt-semantic"');
     expect(html).toContain('data-rpt-theme="dark"');
     expect(html).toContain('--rpt-brand:#8764b8');
     const embedded = JSON.parse(/<script type="application\/json" id="rpt-model">([\s\S]*?)<\/script>/.exec(html)[1]);
-    expect(embedded.rows).toHaveLength(t.model.rows.length);
+    expect(embedded.pages).toHaveLength(3);
     expect(embedded.theme.palette).toBe('ocean');
-    expect(new TextEncoder().encode(html).length).toBeLessThan(12000);
+    expect(new TextEncoder().encode(html).length).toBeLessThan(20000);
   });
   it('escapa los datos inyectados para no romper el <script>', () => {
     const out = injectData('<html><head></head></html>', { x: '</script><b>' });
@@ -141,8 +146,9 @@ describe('diff', () => {
   it('compara versiones: componentes, SQL y parámetros', () => {
     const a = { ...salesTemplate(), mode: 'designer' };
     const b = structuredClone(a);
-    b.model.rows[1].cells.pop();
-    b.model.rows[0].cells[0].props.label = 'Zona';
+    b.model.pages[0].rows[1].cells.pop();
+    b.model.pages[0].rows[0].cells[0].props.label = 'Zona';
+    b.semantic.measures.push({ name: 'nueva', expr: 'MAX(importe)' });
     b.dataSources[0].sql += '\nLIMIT 10';
     b.params[0].default = 2026;
     const d = diffVersions(a, b);
@@ -150,6 +156,7 @@ describe('diff', () => {
     expect(d.components.changed[0].changes.join(' ')).toMatch(/label/);
     expect(d.sources.changed[0].sql.some((l) => l.type === 'add' && l.text === 'LIMIT 10')).toBe(true);
     expect(d.params.changed[0]).toMatch(/2026/);
+    expect(d.semantic.join(' ')).toMatch(/\+ medida nueva/);
     expect(diffVersions(a, a).empty).toBe(true);
     expect(lineDiff('a\nb', 'a\nc').map((x) => x.type)).toEqual(['same', 'del', 'add']);
   });

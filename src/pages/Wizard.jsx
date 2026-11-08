@@ -5,8 +5,10 @@ import ReportFrame from '../components/ReportFrame.jsx';
 import Icon from '../components/Icon.jsx';
 import { readHtmlFile } from '../components/HtmlTab.jsx';
 import { autoLayout } from '../lib/autoLayout.js';
-import { emptyModel, generateHtml, parseModelFromHtml, sourcesUsedInHtml } from '../lib/htmlGenerator.js';
-import { renameSource, sourceUsage, validateModel } from '../lib/modelOps.js';
+import { allRows, emptyModel, generateHtml, parseModelFromHtml, sourcesUsedInHtml } from '../lib/htmlGenerator.js';
+import { renameSource, renameSourceInSemantic, sourceUsage, validateModel } from '../lib/modelOps.js';
+import SemanticEditor from '../components/SemanticEditor.jsx';
+import { emptySemantic } from '../lib/reportData.js';
 import { buildReportData } from '../lib/sqlEngine.js';
 import { createReport } from '../lib/store.js';
 import { TEMPLATES } from '../lib/templates.js';
@@ -21,7 +23,7 @@ const START = [
 export default function Wizard({ go, initialMode }) {
   const [step, setStep] = useState(0);
   const [start, setStart] = useState(initialMode === 'manual' ? 'manual' : 'blank');
-  const [draft, setDraft] = useState({ name: '', description: '', mode: initialMode === 'manual' ? 'manual' : 'designer', model: emptyModel(''), dataSources: [], params: [], html: '' });
+  const [draft, setDraft] = useState({ name: '', description: '', mode: initialMode === 'manual' ? 'manual' : 'designer', model: emptyModel(''), dataSources: [], params: [], semantic: emptySemantic(), html: '' });
   const [error, setError] = useState('');
   const fileRef = useRef(null);
   const manual = start === 'manual';
@@ -36,22 +38,22 @@ export default function Wizard({ go, initialMode }) {
       const t = tpl.build();
       setDraft((d) => ({ ...d, ...t, mode: 'designer', name: d.name || t.model.title, model: { ...t.model, title: d.name || t.model.title } }));
     } else if (id === 'blank' || id === 'auto') {
-      setDraft((d) => ({ ...d, mode: 'designer', model: emptyModel(d.name), dataSources: [], params: [] }));
+      setDraft((d) => ({ ...d, mode: 'designer', model: emptyModel(d.name), dataSources: [], params: [], semantic: emptySemantic() }));
     } else {
-      setDraft((d) => ({ ...d, mode: 'manual', dataSources: [], params: [] }));
+      setDraft((d) => ({ ...d, mode: 'manual', dataSources: [], params: [], semantic: emptySemantic() }));
     }
   };
 
   const html = useMemo(() => (draft.mode === 'designer' ? generateHtml(draft) : draft.html), [draft]);
   const issues = draft.mode === 'designer'
-    ? validateModel(draft.model, draft.dataSources)
+    ? validateModel(draft.model, draft.dataSources, draft.semantic)
     : sourcesUsedInHtml(draft.html || '<p></p>').filter((s) => !draft.dataSources.some((d) => d.id === s)).map((s) => ({ msg: `El HTML usa el origen «${s}», que no está definido` }));
 
   const canNext = () => {
     if (step === 0 && !draft.name.trim()) return 'Indica un nombre para el informe.';
     if (step === 1 && start === 'auto' && !draft.dataSources.length) return 'Para el diseño automático define al menos un origen de datos.';
     if (step === 2 && manual && !draft.html) return 'Sube un archivo HTML o pega su contenido.';
-    if (step === 2 && !manual && !draft.model.rows.length) return 'Añade al menos un componente al lienzo.';
+    if (step === 2 && !manual && !allRows(draft.model).some((r) => r.cells.length)) return 'Añade al menos un componente al lienzo.';
     return '';
   };
   const next = () => {
@@ -59,9 +61,10 @@ export default function Wizard({ go, initialMode }) {
     setError(e);
     if (e) return;
     if (step === 0 && draft.mode === 'designer' && !draft.model.title) patch({ model: { ...draft.model, title: draft.name } });
-    if (step === 1 && start === 'auto' && !draft.model.rows.length) {
+    if (step === 1 && start === 'auto' && !allRows(draft.model).length) {
       const { data } = buildReportData(draft.dataSources, draft.params);
       patch({ model: { ...autoLayout(draft.dataSources, data, { title: draft.model.title || draft.name, subtitle: draft.description }), theme: draft.model.theme } });
+
     }
     setStep(step + 1);
   };
@@ -110,12 +113,18 @@ export default function Wizard({ go, initialMode }) {
           <>
             <p className="ui-hint">Define las consultas que alimentan el informe con el <b>editor visual</b> (arrastrando tablas) o escribiendo SQL, y revisa el tipo y formato de cada campo.{start === 'auto' ? ' Al continuar se generará un diseño a partir de estos orígenes.' : ''}</p>
             <DataSourcesEditor dataSources={draft.dataSources} params={draft.params} usage={sourceUsage(draft.model)} onChange={patch}
-              onRename={(from, to) => setDraft((d) => ({ ...d, model: renameSource(d.model, from, to) }))} />
+              onRename={(from, to) => setDraft((d) => ({ ...d, model: renameSource(d.model, from, to), semantic: renameSourceInSemantic(d.semantic, from, to) }))} />
+            {draft.dataSources.length > 0 && (
+              <details className="wizard-sem" open={!!(draft.semantic?.measures?.length || draft.semantic?.relations?.length || draft.semantic?.hierarchies?.length)}>
+                <summary><Icon path="M5 6h5v4H5z M14 14h5v4h-5z M14 4h5v4h-5z M10 8h4 M16.5 8v6" size={16} /> Modelo semántico (opcional): relaciones, medidas y jerarquías</summary>
+                <SemanticEditor semantic={draft.semantic} dataSources={draft.dataSources} params={draft.params} onChange={(semantic) => patch({ semantic })} />
+              </details>
+            )}
           </>
         )}
 
         {step === 2 && !manual && (
-          <Designer model={draft.model} dataSources={draft.dataSources} params={draft.params} onChange={(model) => patch({ model })} />
+          <Designer model={draft.model} dataSources={draft.dataSources} params={draft.params} semantic={draft.semantic} onChange={(model) => patch({ model })} />
         )}
 
         {step === 2 && manual && (
@@ -153,7 +162,7 @@ export default function Wizard({ go, initialMode }) {
               </ul>
               {issues.length > 0 && <div className="ui-msg ui-msg-warn"><b>Avisos</b><ul>{issues.map((i, k) => <li key={k}>{i.msg}</li>)}</ul></div>}
             </div>
-            <ReportFrame html={html} dataSources={draft.dataSources} params={draft.params} />
+            <ReportFrame html={html} dataSources={draft.dataSources} params={draft.params} semantic={draft.semantic} model={draft.model} reportName={draft.name} brand={draft.model?.theme?.brand} />
           </div>
         )}
       </div>

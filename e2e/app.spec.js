@@ -36,10 +36,11 @@ test('vista previa: filtros y filtro cruzado entre componentes', async ({ page }
   await page.getByRole('button', { name: /Quitar 2 filtros/ }).click();
   await expect(tile).toHaveText(before);
   // menú de tarjeta: ver datos y exportar CSV
-  await f.locator('[data-rpt=grid] .rpt-menu-btn').click();
+  await f.locator('.rpt-pages-nav button', { hasText: 'Detalle' }).click();
+  await f.locator('[data-rpt=grid] .rpt-menu-btn').first().click();
   const download = page.waitForEvent('download');
   await f.locator('.rpt-menu button[data-act=csv]').click();
-  expect((await download).suggestedFilename()).toBe('pedidos.csv');
+  expect((await download).suggestedFilename()).toBe('pedidos-por-region-y-comercial.csv');
 });
 
 test('parámetro de rango de fechas y origen derivado', async ({ page }) => {
@@ -126,7 +127,7 @@ test('renombrar un origen actualiza los componentes que lo usan', async ({ page 
 
 test('historial: guardar, publicar, comparar y restaurar en parte', async ({ page }) => {
   await openReport(page, 'Ventas 2025', 'Diseño');
-  await page.locator('.dz-tool', { hasText: 'Texto' }).click();
+  await page.locator('.dz-tool:has(b:text-is("Texto"))').click();
   await page.getByRole('button', { name: 'Guardar versión' }).click();
   await expect(page.locator('.toast')).toContainText('versión 2');
   await page.getByRole('button', { name: 'Publicar', exact: true }).click();

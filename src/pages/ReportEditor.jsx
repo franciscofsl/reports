@@ -6,18 +6,20 @@ import HtmlTab from '../components/HtmlTab.jsx';
 import Icon from '../components/Icon.jsx';
 import ReportFrame from '../components/ReportFrame.jsx';
 import { emptyModel, generateHtml, parseModelFromHtml } from '../lib/htmlGenerator.js';
-import { renameSource, sourceUsage, validateModel } from '../lib/modelOps.js';
+import { renameSource, renameSourceInSemantic, sourceUsage, validateModel } from '../lib/modelOps.js';
+import SemanticEditor from '../components/SemanticEditor.jsx';
 import { getReport, listVersions, publishVersion, saveReport } from '../lib/store.js';
 
 const TABS = [
   { id: 'preview', label: 'Vista previa', icon: 'eye' },
   { id: 'design', label: 'Diseño', icon: 'layout' },
   { id: 'data', label: 'Orígenes de datos', icon: 'db' },
+  { id: 'model', label: 'Modelo', icon: 'M5 6h5v4H5z M14 14h5v4h-5z M14 4h5v4h-5z M10 8h4 M16.5 8v6' },
   { id: 'html', label: 'HTML', icon: 'code' },
   { id: 'history', label: 'Historial', icon: 'history' },
 ];
 
-const snapshot = (r) => JSON.stringify({ n: r.name, d: r.description, m: r.mode, mo: r.model, ds: r.dataSources, p: r.params, h: r.mode === 'manual' ? r.html : '' });
+const snapshot = (r) => JSON.stringify({ n: r.name, d: r.description, m: r.mode, mo: r.model, ds: r.dataSources, p: r.params, s: r.semantic || null, h: r.mode === 'manual' ? r.html : '' });
 
 export default function ReportEditor({ id, tab, go }) {
   const [saved, setSaved] = useState(() => getReport(id));
@@ -36,7 +38,7 @@ export default function ReportEditor({ id, tab, go }) {
   }, [dirty]);
 
   const html = useMemo(() => (draft ? (draft.mode === 'designer' ? generateHtml(draft) : draft.html) : ''), [draft]);
-  const issues = useMemo(() => (draft?.mode === 'designer' ? validateModel(draft.model, draft.dataSources) : []), [draft]);
+  const issues = useMemo(() => (draft?.mode === 'designer' ? validateModel(draft.model, draft.dataSources, draft.semantic) : []), [draft]);
 
   if (!draft) {
     return <div className="page"><div className="ui-card ui-empty"><p>Informe no encontrado.</p><button className="ui-btn" type="button" onClick={() => go('#/')}>Volver</button></div></div>;
@@ -91,9 +93,9 @@ export default function ReportEditor({ id, tab, go }) {
       </nav>
 
       <div className="tab-body" role="tabpanel">
-        {tab === 'preview' && <ReportFrame key={draft.version} html={html} dataSources={draft.dataSources} params={draft.params} height="calc(100vh - 260px)" />}
+        {tab === 'preview' && <ReportFrame key={draft.version} html={html} dataSources={draft.dataSources} params={draft.params} semantic={draft.semantic} model={draft.model} reportId={id} reportName={draft.name} brand={draft.model?.theme?.brand} height="calc(100vh - 260px)" />}
         {tab === 'design' && (draft.mode === 'designer' ? (
-          <Designer model={draft.model || emptyModel(draft.name)} dataSources={draft.dataSources} params={draft.params} onChange={(model) => patch({ model })} />
+          <Designer model={draft.model || emptyModel(draft.name)} dataSources={draft.dataSources} params={draft.params} semantic={draft.semantic} reportId={id} onChange={(model) => patch({ model })} />
         ) : (
           <div className="ui-card ui-empty">
             <p><b>Este informe usa HTML manual.</b></p>
@@ -114,7 +116,8 @@ export default function ReportEditor({ id, tab, go }) {
           </div>
         ))}
         {tab === 'data' && <DataSourcesEditor dataSources={draft.dataSources} params={draft.params} usage={sourceUsage(draft.mode === 'designer' ? draft.model : null)} onChange={patch}
-          onRename={(from, to) => setDraft((d) => ({ ...d, model: renameSource(d.model, from, to) }))} />}
+          onRename={(from, to) => setDraft((d) => ({ ...d, model: renameSource(d.model, from, to), semantic: renameSourceInSemantic(d.semantic, from, to) }))} />}
+        {tab === 'model' && <SemanticEditor semantic={draft.semantic} dataSources={draft.dataSources} params={draft.params} onChange={(semantic) => patch({ semantic })} />}
         {tab === 'html' && <HtmlTab report={draft} onChange={patch} />}
         {tab === 'history' && <HistoryTab report={saved} dirty={dirty} onPublished={() => setSaved(getReport(id))} onRestored={(r) => { setSaved(r); setDraft(r); flash(`Restaurada como versión ${r.version}`); }} />}
       </div>

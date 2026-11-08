@@ -73,6 +73,28 @@ ORDER BY p.fecha DESC`,
     ],
   },
   {
+    name: 'Histórico de ventas', id: 'historico',
+    sql: `SELECT p.id, p.fecha, SUBSTRING(p.fecha, 1, 7) AS mes,
+       c.region, c.comunidad, c.provincia, c.segmento,
+       e.nombre AS comercial, p.estado, p.importe
+FROM pedidos p
+JOIN clientes c ON p.cliente_id = c.id
+JOIN empleados e ON p.empleado_id = e.id
+WHERE p.estado <> 'Cancelado'`,
+    fields: [
+      { name: 'id', label: 'Nº pedido', type: 'number', format: 'integer' },
+      { name: 'fecha', label: 'Fecha', type: 'date', format: 'date' },
+      { name: 'mes', label: 'Mes', type: 'string', format: '' },
+      { name: 'region', label: 'Región', type: 'string', format: '' },
+      { name: 'comunidad', label: 'Comunidad', type: 'string', format: '' },
+      { name: 'provincia', label: 'Provincia', type: 'string', format: '' },
+      { name: 'segmento', label: 'Segmento', type: 'string', format: '' },
+      { name: 'comercial', label: 'Comercial', type: 'string', format: '' },
+      { name: 'estado', label: 'Estado', type: 'string', format: '' },
+      { name: 'importe', label: 'Importe', type: 'number', format: 'currency' },
+    ],
+  },
+  {
     name: 'Clientes', id: 'clientes',
     sql: `SELECT id, nombre, segmento, region, ciudad, alta, activo
 FROM clientes
@@ -106,38 +128,85 @@ const snip = (id, extra = {}) => {
 export function salesTemplate() {
   return {
     params: [{ name: 'anio', label: 'Año', type: 'number', default: 2025 }],
-    dataSources: [snip('pedidos'), snip('top_productos')],
+    dataSources: [snip('pedidos'), snip('top_productos'), snip('historico')],
+    semantic: {
+      autoRelate: true, associative: false,
+      relations: [{ from: { source: 'historico', field: 'id' }, to: { source: 'pedidos', field: 'id' } }],
+      measures: [
+        { name: 'facturacion', label: 'Facturación', source: '', expr: 'SUM(importe)', format: 'currency' },
+        { name: 'ticket_medio', label: 'Ticket medio', source: '', expr: 'SUM(importe) / COUNT(*)', format: 'currency' },
+        { name: 'pct_total', label: '% sobre el total', source: '', expr: 'SUM(importe) / TOTAL(SUM(importe))', format: 'percent' },
+        { name: 'entregado', label: 'Facturación entregada', source: 'pedidos', expr: "SUM(importe WHERE estado = 'Entregado')", format: 'currency' },
+      ],
+      hierarchies: [{ name: 'calendario', label: 'Calendario', source: 'historico', levels: [{ field: 'fecha', part: 'year' }, { field: 'fecha', part: 'quarter' }, { field: 'fecha', part: 'month' }, { field: 'fecha', part: 'day' }] }],
+    },
     model: {
       libVersion: LIB_VERSION, theme: { ...THEME },
       title: 'Cuadro de mando de ventas',
       subtitle: 'Filtra por región, estado o comercial; haz clic en los gráficos para filtrar el resto',
-      rows: [
-        { id: 'r0', cells: [
-          { id: 'f1', span: 6, type: 'filter', source: 'pedidos', props: { field: 'region', label: 'Región', mode: 'multi' } },
-          { id: 'f2', span: 3, type: 'filter', source: 'pedidos', props: { field: 'estado', label: 'Estado', mode: 'select' } },
-          { id: 'f3', span: 3, type: 'filter', source: 'pedidos', props: { field: 'comercial', label: 'Comercial', mode: 'select' } },
-        ] },
-        { id: 'r1', cells: [
-          { id: 'c1', span: 3, type: 'tile', source: 'pedidos', props: { title: 'Facturación', field: 'importe', agg: 'sum', format: 'compactCurrency', icon: 'money', color: 'brand', trendField: 'mes', goodWhen: 'higher' } },
-          { id: 'c2', span: 3, type: 'tile', source: 'pedidos', props: { title: 'Pedidos', field: 'id', agg: 'count', format: 'integer', icon: 'cart', color: 'teal', subtitle: 'Todos los estados' } },
-          { id: 'c3', span: 3, type: 'tile', source: 'pedidos', props: { title: 'Clientes', field: 'cliente', agg: 'countDistinct', format: 'integer', icon: 'people', color: 'purple' } },
-          { id: 'c4', span: 3, type: 'tile', source: 'pedidos', props: { title: 'Ticket medio', field: 'importe', agg: 'avg', format: 'currency', icon: 'star', color: 'orange' } },
-        ] },
-        { id: 'r2', cells: [
-          { id: 'c5', span: 8, type: 'chart', source: 'pedidos', props: { title: 'Facturación mensual', type: 'column', category: 'mes', values: ['importe'], agg: 'sum', sort: 'label' } },
-          { id: 'c6', span: 4, type: 'chart', source: 'pedidos', props: { title: 'Reparto por región', type: 'donut', category: 'region', values: ['importe'], agg: 'sum' } },
-        ] },
-        { id: 'r3', cells: [
-          { id: 'c7', span: 4, type: 'gauge', source: 'pedidos', props: { title: 'Facturación vs objetivo anual', field: 'importe', agg: 'sum', format: 'currency', target: 4000000, goodWhen: 'higher' } },
-          { id: 'c8', span: 8, type: 'chart', source: 'top_productos', props: { title: 'Top productos por importe', type: 'bar', category: 'producto', values: ['importe'], agg: 'sum', sort: 'desc', limit: 8 } },
-        ] },
-        { id: 'r4', cells: [
-          { id: 'c9', span: 12, type: 'grid', source: 'pedidos', props: {
-            title: 'Pedidos', columns: ['id', 'fecha', 'cliente', 'region', 'comercial', 'estado', 'importe'], pageSize: 10, search: true, totals: true, sortBy: 'fecha', sortDir: 'desc',
-            filterField: 'region', databars: ['importe'],
-            rules: [{ field: 'estado', op: '=', value: 'Cancelado', style: 'bad' }, { field: 'estado', op: '=', value: 'Pendiente', style: 'warn' }, { field: 'importe', op: '>', value: 20000, style: 'bold' }],
-          } },
-        ] },
+      reportFilters: [{ source: 'historico', field: 'segmento', label: 'Segmento', mode: 'multi' }],
+      paper: { size: 'A4', orientation: 'landscape', margin: 12, header: 'Cuadro de mando de ventas', footer: 'Confidencial · uso interno', pageNumbers: true, showDate: true },
+      pages: [
+        {
+          id: 'resumen', name: 'Resumen',
+          rows: [
+            { id: 'r0', cells: [
+              { id: 'f1', span: 6, type: 'filter', source: 'pedidos', props: { field: 'region', label: 'Región', mode: 'multi' } },
+              { id: 'f2', span: 3, type: 'filter', source: 'pedidos', props: { field: 'estado', label: 'Estado', mode: 'select' } },
+              { id: 'f3', span: 3, type: 'filter', source: 'pedidos', props: { field: 'comercial', label: 'Comercial', mode: 'select' } },
+            ] },
+            { id: 'r1', cells: [
+              { id: 'c1', span: 3, type: 'tile', source: 'pedidos', props: { title: 'Facturación', field: 'm:facturacion', format: 'compactCurrency', icon: 'money', color: 'brand', trendField: 'mes', goodWhen: 'higher' } },
+              { id: 'c2', span: 3, type: 'tile', source: 'pedidos', props: { title: 'Pedidos', field: 'id', agg: 'count', format: 'integer', icon: 'cart', color: 'teal', subtitle: 'Todos los estados' } },
+              { id: 'c3', span: 3, type: 'tile', source: 'pedidos', props: { title: 'Clientes', field: 'cliente', agg: 'countDistinct', format: 'integer', icon: 'people', color: 'purple' } },
+              { id: 'c4', span: 3, type: 'tile', source: 'pedidos', props: { title: 'Ticket medio', field: 'm:ticket_medio', format: 'currency', icon: 'star', color: 'orange' } },
+            ] },
+            { id: 'r2', cells: [
+              { id: 'c5', span: 8, type: 'chart', source: 'pedidos', props: { title: 'Facturación mensual', type: 'column', category: 'mes', values: ['m:facturacion'], sort: 'label', refLines: [{ type: 'avg', label: 'Media' }] } },
+              { id: 'c6', span: 4, type: 'chart', source: 'pedidos', props: { title: 'Reparto por región', type: 'donut', category: 'region', values: ['importe'], agg: 'sum' } },
+            ] },
+            { id: 'r3', cells: [
+              { id: 'c7', span: 4, type: 'gauge', source: 'pedidos', props: { title: 'Facturación vs objetivo anual', field: 'importe', agg: 'sum', format: 'currency', target: 4000000, goodWhen: 'higher' } },
+              { id: 'c8', span: 8, type: 'chart', source: 'top_productos', props: { title: 'Top productos por importe', type: 'bar', category: 'producto', values: ['importe'], agg: 'sum', sort: 'desc', limit: 8 } },
+            ] },
+          ],
+        },
+        {
+          id: 'analisis', name: 'Análisis',
+          rows: [
+            { id: 'a0', cells: [{ id: 'n1', span: 12, type: 'narrative', source: 'historico', props: { title: 'Lo más destacado', field: 'importe', agg: 'sum', label: 'facturación', timeField: 'mes', category: 'region' } }] },
+            { id: 'a1', cells: [
+              { id: 'g1', span: 8, type: 'chart', source: 'historico', props: { title: 'Facturación mensual vs año anterior, con previsión', type: 'line', category: 'mes', values: ['importe'], agg: 'sum', compare: 'yoy', forecast: 3, anomalies: true, refLines: [{ type: 'trend', label: 'Tendencia' }] } },
+              { id: 'g2', span: 4, type: 'map', source: 'historico', props: { title: 'Facturación por comunidad', geo: 'es-comunidades', field: 'comunidad', value: 'importe', agg: 'sum', format: 'currency' } },
+            ] },
+            { id: 'a2', cells: [
+              { id: 'g3', span: 6, type: 'chart', source: 'historico', props: { title: 'Profundiza: año → trimestre → mes → día', type: 'column', category: 'h:calendario', values: ['m:facturacion'] } },
+              { id: 'g4', span: 6, type: 'treemap', source: 'historico', props: { title: 'Comunidades por región', category: 'comunidad', group: 'region', value: 'importe', agg: 'sum', format: 'currency' } },
+            ] },
+            { id: 'a3', cells: [{ id: 'g5', span: 12, type: 'calendar', source: 'historico', props: { title: 'Facturación diaria', dateField: 'fecha', value: 'importe', agg: 'sum', years: 1, format: 'currency' } }] },
+            { id: 'a4', cells: [{ id: 'g6', span: 12, type: 'chart', source: 'historico', props: { title: 'Evolución por región (múltiplos pequeños)', type: 'area', category: 'mes', values: ['importe'], agg: 'sum', sort: 'label', splitBy: 'region' } }] },
+            { id: 'a5', cells: [
+              { id: 'g7', span: 6, type: 'waterfall', source: 'historico', props: { title: 'Contribución por segmento', category: 'segmento', values: ['importe'], agg: 'sum', total: true } },
+              { id: 'g8', span: 6, type: 'funnel', source: 'pedidos', props: { title: 'Pedidos por estado', category: 'estado', values: ['id'], agg: 'count' } },
+            ] },
+            { id: 'a6', cells: [{ id: 'g9', span: 12, type: 'sankey', source: 'historico', props: { title: 'Flujo región → segmento → estado', levels: ['region', 'segmento', 'estado'], value: 'importe', agg: 'sum', format: 'currency' } }] },
+          ],
+        },
+        {
+          id: 'detalle', name: 'Detalle',
+          rows: [
+            { id: 'd0', cells: [{ id: 't1', span: 12, type: 'grid', source: 'pedidos', props: {
+              title: 'Pedidos por región y comercial', columns: ['id', 'fecha', 'cliente', 'estado', 'importe'], groupBy: ['region', 'comercial'], subtotals: true, groupPageBreak: true, totals: true, search: true,
+              sortBy: 'fecha', sortDir: 'desc', filterField: 'region', databars: ['importe'],
+              rules: [{ field: 'estado', op: '=', value: 'Entregado', style: 'dot-good' }, { field: 'estado', op: '=', value: 'Pendiente', style: 'dot-warn' }, { field: 'estado', op: '=', value: 'Cancelado', style: 'dot-bad' }, { field: 'importe', op: '>', value: 20000, style: 'icon-up' }],
+            } }] },
+            { id: 'd1', cells: [{ id: 'pb', span: 12, type: 'pagebreak', source: '', props: {} }] },
+            { id: 'd2', cells: [{ id: 't2', span: 12, type: 'grid', source: 'top_productos', props: {
+              title: 'Productos', columns: ['producto', 'categoria', 'region', 'unidades', 'importe'], pageSize: 10, totals: true, search: true, sortBy: 'importe', sortDir: 'desc',
+              rules: [{ field: 'unidades', op: '<', value: 20, style: 'flag' }, { field: 'importe', op: '>', value: 200000, style: 'star' }],
+            } }] },
+          ],
+        },
       ],
     },
   };
@@ -165,9 +234,11 @@ export function salesTeamTemplate() {
           { id: 'g1', span: 7, type: 'chart', source: 'ventas_comercial', props: { title: 'Ventas vs objetivo', type: 'combo', category: 'comercial', values: ['ventas', 'objetivo'], agg: 'sum', sort: 'desc' } },
           { id: 'g2', span: 5, type: 'scatter', source: 'ventas_comercial', props: { title: 'Objetivo vs ventas', x: 'objetivo', y: 'ventas', size: 'pedidos', color: 'region', label: 'comercial' } },
         ] },
+        { id: 'r25', cells: [{ id: 'b1', span: 12, type: 'bullet', source: 'ventas_comercial', props: { title: 'Ventas frente a objetivo por comercial', category: 'comercial', value: 'ventas', agg: 'sum', targetField: 'objetivo', ranges: [60, 90], goodWhen: 'higher', format: 'currency' } }] },
         { id: 'r3', cells: [
           { id: 't1', span: 6, type: 'grid', source: 'ventas_comercial', props: { title: 'Ranking', columns: ['comercial', 'region', 'ventas', 'objetivo', 'cumplimiento'], sortBy: 'cumplimiento', sortDir: 'desc', search: false, totals: false, pageSize: 10,
-            rules: [{ field: 'cumplimiento', op: '>=', value: 1, style: 'good-bg' }, { field: 'cumplimiento', op: '<', value: 0.8, style: 'bad' }], databars: ['ventas'], filterField: 'comercial' } },
+            rules: [{ field: 'cumplimiento', op: '>=', value: 1, style: 'dot-good' }, { field: 'cumplimiento', op: '<', value: 1, style: 'dot-warn' }, { field: 'cumplimiento', op: '<', value: 0.8, style: 'dot-bad' }], databars: ['ventas'], filterField: 'comercial',
+            sparklines: [{ source: 'pedidos', key: 'comercial', time: 'mes', value: 'importe', agg: 'sum', label: 'Evolución mensual' }] } },
           { id: 't2', span: 6, type: 'pivot', source: 'pedidos', props: { title: 'Pedidos por comercial y estado', rows: 'comercial', cols: 'estado', value: 'importe', agg: 'sum', format: 'compactCurrency', totals: true, heatmap: true } },
         ] },
       ],
@@ -226,7 +297,7 @@ LEFT JOIN origen.vendidos v ON v.producto_id = pr.id`, fields: [
 }
 
 export const TEMPLATES = [
-  { id: 'sales', name: 'Ventas', description: 'Filtros, losetas con tendencia, gráficos con filtro cruzado, gauge y tabla con formato condicional.', icon: 'report', build: salesTemplate },
+  { id: 'sales', name: 'Ventas', description: '3 páginas con modelo semántico, drill-down, comparación interanual, previsión, mapa, Sankey y tabla agrupada.', icon: 'report', build: salesTemplate },
   { id: 'team', name: 'Equipo comercial', description: 'Ventas vs objetivo, gráfico combinado, dispersión, ranking y tabla dinámica.', icon: 'people', build: salesTeamTemplate },
   { id: 'inventory', name: 'Inventario', description: 'Campos calculados, origen derivado, rango de fechas y filtros de búsqueda y rango.', icon: 'box', build: inventoryTemplate },
 ];

@@ -1,5 +1,6 @@
 // Comparación entre dos versiones de un informe.
 import { byType } from './catalog.js';
+import { modelPages } from './htmlGenerator.js';
 
 /** Diff por líneas (LCS). Devuelve [{ type: 'same'|'add'|'del', text }]. */
 export function lineDiff(a = '', b = '') {
@@ -22,7 +23,10 @@ export function lineDiff(a = '', b = '') {
   return out;
 }
 
-const cellsOf = (model) => Object.fromEntries((model?.rows || []).flatMap((r, ri) => r.cells.map((c, ci) => [c.id, { ...c, pos: `${ri + 1}.${ci + 1}` }])));
+const cellsOf = (model) => {
+  const pages = modelPages(model);
+  return Object.fromEntries(pages.flatMap((pg) => (pg.rows || []).flatMap((r, ri) => r.cells.map((c, ci) => [c.id, { ...c, pos: `${pages.length > 1 ? `${pg.name} · ` : ''}${ri + 1}.${ci + 1}` }]))));
+};
 const nameOf = (c) => `${byType[c.type]?.label || c.type}${c.props?.title || c.props?.label || c.props?.text ? ` «${c.props.title || c.props.label || c.props.text}»` : ''}`;
 const eq = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -39,6 +43,26 @@ export function diffVersions(a, b) {
   if (a.model?.subtitle !== b.model?.subtitle) out.general.push('Subtítulo modificado');
   if (!eq(a.model?.theme, b.model?.theme)) out.general.push(`Tema: ${diffObj(a.model?.theme, b.model?.theme).map((d) => `${d.key} ${d.from ?? '—'} → ${d.to ?? '—'}`).join(', ')}`);
   if (a.model?.libVersion !== b.model?.libVersion) out.general.push(`Librería: ${a.model?.libVersion || '—'} → ${b.model?.libVersion || '—'}`);
+  const pa0 = modelPages(a.model).map((p) => p.name);
+  const pb0 = modelPages(b.model).map((p) => p.name);
+  if (JSON.stringify(pa0) !== JSON.stringify(pb0)) out.general.push(`Páginas: ${pa0.join(', ')} → ${pb0.join(', ')}`);
+  if (!eq(a.model?.reportFilters, b.model?.reportFilters)) out.general.push(`Filtros del informe: ${(a.model?.reportFilters || []).length} → ${(b.model?.reportFilters || []).length}`);
+  if (!eq(a.model?.paper, b.model?.paper)) out.general.push('Diseño de página modificado');
+  const sa0 = a.semantic || {};
+  const sb0 = b.semantic || {};
+  const mA = Object.fromEntries((sa0.measures || []).map((m) => [m.name, m]));
+  const mB = Object.fromEntries((sb0.measures || []).map((m) => [m.name, m]));
+  out.semantic = [];
+  for (const k of Object.keys(mB)) if (!mA[k]) out.semantic.push(`+ medida ${k}: ${mB[k].expr}`);
+  for (const k of Object.keys(mA)) if (!mB[k]) out.semantic.push(`− medida ${k}`);
+  for (const k of Object.keys(mB)) if (mA[k] && !eq(mA[k], mB[k])) out.semantic.push(`medida ${k}: ${mA[k].expr} → ${mB[k].expr}`);
+  const rel = (s0) => (s0.relations || []).map((r) => `${r.from.source}.${r.from.field} ↔ ${r.to.source}.${r.to.field}`);
+  const rA = rel(sa0);
+  const rB = rel(sb0);
+  rB.filter((x) => !rA.includes(x)).forEach((x) => out.semantic.push(`+ relación ${x}`));
+  rA.filter((x) => !rB.includes(x)).forEach((x) => out.semantic.push(`− relación ${x}`));
+  if (!eq(sa0.hierarchies, sb0.hierarchies)) out.semantic.push(`Jerarquías: ${(sa0.hierarchies || []).length} → ${(sb0.hierarchies || []).length}`);
+  if (!!sa0.associative !== !!sb0.associative) out.semantic.push(`Selección asociativa: ${sa0.associative ? 'sí' : 'no'} → ${sb0.associative ? 'sí' : 'no'}`);
   if (a.mode === 'manual' || b.mode === 'manual') {
     if (a.html !== b.html) out.general.push('HTML modificado');
   }
@@ -81,6 +105,6 @@ export function diffVersions(a, b) {
   for (const k of Object.keys(pa)) if (!pb[k]) out.params.removed.push(k);
   for (const k of Object.keys(pb)) if (pa[k] && !eq(pa[k], pb[k])) out.params.changed.push(`${k}: ${diffObj(pa[k], pb[k]).map((d) => `${d.key} ${JSON.stringify(d.from ?? null)} → ${JSON.stringify(d.to ?? null)}`).join(', ')}`);
 
-  out.empty = !out.general.length && !Object.values(out.components).some((l) => l.length) && !Object.values(out.sources).some((l) => l.length) && !Object.values(out.params).some((l) => l.length);
+  out.empty = !out.general.length && !out.semantic.length && !Object.values(out.components).some((l) => l.length) && !Object.values(out.sources).some((l) => l.length) && !Object.values(out.params).some((l) => l.length);
   return out;
 }

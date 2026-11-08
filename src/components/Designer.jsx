@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { CATALOG, THEME_DEFAULTS, autoBind, byType, newCell } from '../lib/catalog.js';
+import { CATALOG, THEME_DEFAULTS, autoBind, byType, newCell, uid } from '../lib/catalog.js';
 import * as ops from '../lib/modelOps.js';
 import { autoLayout } from '../lib/autoLayout.js';
 import { buildReportData } from '../lib/sqlEngine.js';
-import { deleteBlock, listBlocks, readClipboard, saveBlock, subscribe, writeClipboard } from '../lib/store.js';
+import { deleteBlock, listBlocks, listReports, readClipboard, saveBlock, subscribe, writeClipboard } from '../lib/store.js';
 import Icon from './Icon.jsx';
 import LiveComponent from './LiveComponent.jsx';
 import PropertyPanel from './PropertyPanel.jsx';
+import ShowMePanel from './ShowMePanel.jsx';
+import { modelPages } from '../lib/htmlGenerator.js';
 
 const GROUPS = [...new Set(CATALOG.map((c) => c.group))];
 const DEVICES = [
@@ -18,7 +20,7 @@ let blocksCache = null;
 const blocksSnap = () => (blocksCache ??= listBlocks());
 const blocksSub = (fn) => subscribe(() => { blocksCache = null; fn(); });
 
-export default function Designer({ model, dataSources, params, onChange }) {
+export default function Designer({ model, dataSources, params, onChange, semantic, reportId }) {
   const [selection, setSelection] = useState([]);
   const [pane, setPane] = useState('canvas'); // pestaña visible en móvil
   const [device, setDevice] = useState('desktop');
@@ -28,20 +30,27 @@ export default function Designer({ model, dataSources, params, onChange }) {
   const undo = useRef({ past: [], future: [] });
   const blocks = useSyncExternalStore(blocksSub, blocksSnap);
 
+  const [pageIdx, setPageIdx] = useState(0);
+  const pages = modelPages(model);
+  const pi = Math.min(pageIdx, pages.length - 1);
+  const pm = useMemo(() => ops.pageModel(model, pi), [model, pi]);
+  const reports = useMemo(() => listReports().filter((r) => r.id !== reportId), [reportId]);
   const { data } = useMemo(() => buildReportData(dataSources, params), [dataSources, params]);
   const theme = { ...THEME_DEFAULTS, ...(model.theme || {}) };
-  const selCells = selection.map((id) => ops.findCell(model, id)).filter(Boolean);
+  const selCells = selection.map((id) => ops.findCell(pm, id)).filter(Boolean);
   const primary = selection[selection.length - 1] || null;
-  const issues = useMemo(() => ops.validateModel(model, dataSources), [model, dataSources]);
+  const issues = useMemo(() => ops.validateModel(model, dataSources, semantic), [model, dataSources, semantic]);
   const select = (id, additive) => setSelection((s) => (id == null ? [] : additive ? (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]) : [id]));
 
-  const commit = useCallback((next) => {
+  const commitModel = useCallback((next) => {
     if (next === model) return;
     undo.current.past.push(model);
     if (undo.current.past.length > 100) undo.current.past.shift();
     undo.current.future = [];
     onChange(next);
   }, [model, onChange]);
+  // Las operaciones de filas trabajan sobre la página activa.
+  const commit = useCallback((nextPm) => { if (nextPm !== pm) commitModel(ops.withPageRows(model, pi, nextPm.rows)); }, [model, pm, pi, commitModel]);
   const doUndo = useCallback(() => {
     const prev = undo.current.past.pop();
     if (!prev) return;
@@ -59,17 +68,17 @@ export default function Designer({ model, dataSources, params, onChange }) {
   const paste = useCallback(() => {
     const clip = readClipboard();
     if (!clip?.length) return;
-    const r = ops.pasteCells(model, clip, primary);
+    const r = ops.pasteCells(pm, clip, primary);
     commit(r.model);
     setSelection(r.ids);
-  }, [model, primary, commit]);
+  }, [pm, primary, commit]);
   const duplicate = useCallback(() => {
     if (!selCells.length) return;
-    const r = ops.pasteCells(model, selCells, primary);
+    const r = ops.pasteCells(pm, selCells, primary);
     commit(r.model);
     setSelection(r.ids);
-  }, [model, selCells, primary, commit]);
-  const removeSel = useCallback(() => { if (selection.length) { commit(ops.removeCells(model, selection)); setSelection([]); } }, [model, selection, commit]);
+  }, [pm, selCells, primary, commit]);
+  const removeSel = useCallback(() => { if (selection.length) { commit(ops.removeCells(pm, selection)); setSelection([]); } }, [pm, selection, commit]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -83,7 +92,7 @@ export default function Designer({ model, dataSources, params, onChange }) {
       else if (mod && k === 'c' && selection.length) { e.preventDefault(); copy(); }
       else if (mod && k === 'v') { e.preventDefault(); paste(); }
       else if (mod && k === 'd' && selection.length) { e.preventDefault(); duplicate(); }
-      else if (mod && k === 'a') { e.preventDefault(); setSelection(model.rows.flatMap((r) => r.cells.map((c) => c.id))); }
+      else if (mod && k === 'a') { e.preventDefault(); setSelection(pm.rows.flatMap((r) => r.cells.map((c) => c.id))); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selection.length) { e.preventDefault(); removeSel(); }
       else if (e.key === 'Escape') setSelection([]);
     };
@@ -95,21 +104,21 @@ export default function Designer({ model, dataSources, params, onChange }) {
   const create = (type) => autoBind(newCell(type, defaultSource?.id), defaultSource);
   const addByTap = (type) => {
     const cell = create(type);
-    commit(ops.insertCell(model, cell, ops.smartTarget(model, primary, cell.span)));
+    commit(ops.insertCell(pm, cell, ops.smartTarget(pm, primary, cell.span)));
     setSelection([cell.id]);
     setPane('canvas');
   };
   const insertBlock = (b) => {
-    const r = ops.insertRow(model, b.row);
+    const r = ops.insertRow(pm, b.row);
     commit(r.model);
     setSelection(r.ids);
     setPane('canvas');
   };
   const runAutoLayout = () => {
     if (!dataSources.length) return alert('Define antes algún origen de datos.');
-    if (model.rows.length && !confirm('El diseño automático sustituirá el contenido del lienzo (puedes deshacerlo con Ctrl+Z). ¿Continuar?')) return;
+    if (pm.rows.length && !confirm('El diseño automático sustituirá el contenido del lienzo (puedes deshacerlo con Ctrl+Z). ¿Continuar?')) return;
     const m = autoLayout(dataSources, data, { title: model.title, subtitle: model.subtitle });
-    commit({ ...m, theme: model.theme, libVersion: model.libVersion || m.libVersion });
+    commit({ ...pm, rows: m.rows });
     setSelection([]);
   };
 
@@ -121,13 +130,13 @@ export default function Designer({ model, dataSources, params, onChange }) {
     if (!d) return;
     if (d.kind === 'new') {
       const cell = create(d.type);
-      commit(ops.insertCell(model, cell, target));
+      commit(ops.insertCell(pm, cell, target));
       setSelection([cell.id]);
     } else if (d.kind === 'block') {
-      const r = ops.insertRow(model, d.block.row, target.newRow ?? (target.row != null ? target.row + 1 : undefined));
+      const r = ops.insertRow(pm, d.block.row, target.newRow ?? (target.row != null ? target.row + 1 : undefined));
       commit(r.model);
       setSelection(r.ids);
-    } else if (d.kind === 'move') commit(ops.moveCell(model, d.cellId, target));
+    } else if (d.kind === 'move') commit(ops.moveCell(pm, d.cellId, target));
   };
   const startDrag = (e, payload) => {
     drag.current = payload;
@@ -147,7 +156,7 @@ export default function Designer({ model, dataSources, params, onChange }) {
   const overRowEnd = (e, r) => {
     if (!drag.current) return;
     e.preventDefault();
-    const at = model.rows[r].cells.length;
+    const at = pm.rows[r].cells.length;
     if (drop?.row !== r || drop?.at !== at) setDrop({ row: r, at });
   };
   const overNewRow = (e, i) => {
@@ -186,8 +195,8 @@ export default function Designer({ model, dataSources, params, onChange }) {
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       setResize(null);
-      if (last.span && last.span !== cell.span) commit(ops.updateCell(model, cell.id, { span: last.span }));
-      if (last.height) commit(ops.updateCell(model, cell.id, { height: last.height }));
+      if (last.span && last.span !== cell.span) commit(ops.updateCell(pm, cell.id, { span: last.span }));
+      if (last.height) commit(ops.updateCell(pm, cell.id, { height: last.height }));
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
@@ -195,7 +204,25 @@ export default function Designer({ model, dataSources, params, onChange }) {
   };
 
   const dev = DEVICES.find((d) => d.id === device);
-  const canvasStyle = { ...(theme.brand && theme.brand !== THEME_DEFAULTS.brand ? { '--rpt-brand': theme.brand } : {}), ...(dev.width ? { maxWidth: dev.width } : {}) };
+  const paletteArg = theme.palette === 'custom' && theme.colors?.length ? theme.colors : theme.palette;
+  const canvasStyle = {
+    ...(theme.brand && theme.brand !== THEME_DEFAULTS.brand ? { '--rpt-brand': theme.brand } : {}),
+    ...(theme.font ? { '--rpt-font': theme.font } : {}),
+    ...(theme.background ? { '--rpt-bg': theme.background } : {}),
+    ...(dev.width ? { maxWidth: dev.width } : {}),
+  };
+  /* --- páginas --- */
+  const setPages = (next, idx) => { const { rows: _r, ...rest } = model; commitModel({ ...rest, pages: next }); if (idx != null) setPageIdx(idx); setSelection([]); };
+  const addPage = () => setPages([...pages, { id: uid('pg'), name: `Página ${pages.length + 1}`, rows: [] }], pages.length);
+  const renamePage = (i) => { const name = prompt('Nombre de la página', pages[i].name); if (name) setPages(pages.map((pg, j) => (j === i ? { ...pg, name } : pg))); };
+  const removePage = (i) => { if (pages.length < 2 || !confirm(`¿Eliminar la página «${pages[i].name}» y sus componentes?`)) return; setPages(pages.filter((_, j) => j !== i), Math.max(0, i - 1)); };
+  const movePage = (i, d) => { const j = i + d; if (j < 0 || j >= pages.length) return; const n = [...pages]; [n[i], n[j]] = [n[j], n[i]]; setPages(n, j); };
+  const addSuggested = (sg) => {
+    const cell = { id: uid('c'), type: sg.type, span: sg.span, source: sg.source, props: sg.props };
+    commit(ops.insertCell(pm, cell, ops.smartTarget(pm, primary, cell.span)));
+    setSelection([cell.id]);
+    setPane('canvas');
+  };
 
   return (
     <div className="dz" data-pane={pane}>
@@ -208,6 +235,7 @@ export default function Designer({ model, dataSources, params, onChange }) {
       <aside className="dz-palette ui-card" aria-label="Paleta de componentes">
         <div className="ui-card-head"><h3>Componentes</h3><small>RptLib {model.libVersion}</small></div>
         <button type="button" className="ui-btn ui-btn-block" onClick={runAutoLayout} title="Propone un diseño a partir de los orígenes de datos"><Icon name="wand" size={16} />Diseño automático</button>
+        <ShowMePanel dataSources={dataSources} data={data} semantic={semantic} onAdd={addSuggested} palette={paletteArg} />
         {GROUPS.map((g) => (
           <div key={g} className="dz-group">
             <h4>{g}</h4>
@@ -257,6 +285,22 @@ export default function Designer({ model, dataSources, params, onChange }) {
             ))}
           </div>
         </div>
+        <div className="dz-pages" role="tablist" aria-label="Páginas del informe">
+          {pages.map((pg, i) => (
+            <span key={pg.id} className={`dz-page ${i === pi ? 'is-on' : ''}`}>
+              <button type="button" role="tab" aria-selected={i === pi} onClick={() => { setPageIdx(i); setSelection([]); }} onDoubleClick={() => renamePage(i)} title="Doble clic para renombrar">{pg.name}</button>
+              {i === pi && (
+                <>
+                  <button type="button" className="ui-icon-btn ui-icon-btn-s" aria-label="Renombrar página" title="Renombrar" onClick={() => renamePage(i)}><Icon name="edit" size={12} /></button>
+                  {pages.length > 1 && <button type="button" className="ui-icon-btn ui-icon-btn-s" aria-label="Mover página a la izquierda" title="Mover a la izquierda" onClick={() => movePage(i, -1)} disabled={i === 0}><Icon name="left" size={12} /></button>}
+                  {pages.length > 1 && <button type="button" className="ui-icon-btn ui-icon-btn-s" aria-label="Mover página a la derecha" title="Mover a la derecha" onClick={() => movePage(i, 1)} disabled={i === pages.length - 1}><Icon name="right" size={12} /></button>}
+                  {pages.length > 1 && <button type="button" className="ui-icon-btn ui-icon-btn-s ui-danger" aria-label="Eliminar página" title="Eliminar página" onClick={() => removePage(i)}><Icon name="delete" size={12} /></button>}
+                </>
+              )}
+            </span>
+          ))}
+          <button type="button" className="ui-btn ui-btn-subtle dz-addpage" onClick={addPage}><Icon name="add" size={14} />Página</button>
+        </div>
         <div className="dz-canvas" onClick={(e) => { if (e.target === e.currentTarget) select(null); }}>
           <div className={`dz-device rpt-body ${dev.width ? 'is-framed' : ''}`} style={canvasStyle}
             data-rpt-theme={theme.mode !== 'auto' ? theme.mode : undefined} data-rpt-density={theme.density !== 'normal' ? theme.density : undefined}>
@@ -269,7 +313,7 @@ export default function Designer({ model, dataSources, params, onChange }) {
                 {theme.logo && <img className="rpt-logo" src={theme.logo} alt="" />}
               </header>
 
-              {model.rows.length === 0 && (
+              {pm.rows.length === 0 && (
                 <div className={`dz-empty ${drop?.newRow === 0 ? 'is-over' : ''}`} onDragOver={(e) => overNewRow(e, 0)} onDrop={(e) => { e.preventDefault(); applyDrop({ newRow: 0 }); }}>
                   <Icon name="layout" size={32} />
                   <p><b>El informe está vacío.</b></p>
@@ -278,18 +322,18 @@ export default function Designer({ model, dataSources, params, onChange }) {
                 </div>
               )}
 
-              {model.rows.map((row, r) => (
+              {pm.rows.map((row, r) => (
                 <div key={row.id} className={`dz-row-wrap ${row.cells.some((x) => selection.includes(x.id)) ? 'has-sel' : ''}`}>
                   {newRowZone(r)}
                   <div className="dz-row-tools">
-                    <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Subir fila" aria-label="Subir fila" onClick={() => commit(ops.moveRow(model, r, -1))} disabled={r === 0}><Icon name="up" size={14} /></button>
-                    <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Bajar fila" aria-label="Bajar fila" onClick={() => commit(ops.moveRow(model, r, 1))} disabled={r === model.rows.length - 1}><Icon name="down" size={14} /></button>
+                    <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Subir fila" aria-label="Subir fila" onClick={() => commit(ops.moveRow(pm, r, -1))} disabled={r === 0}><Icon name="up" size={14} /></button>
+                    <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Bajar fila" aria-label="Bajar fila" onClick={() => commit(ops.moveRow(pm, r, 1))} disabled={r === pm.rows.length - 1}><Icon name="down" size={14} /></button>
                     <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Seleccionar fila" aria-label="Seleccionar fila" onClick={() => setSelection(row.cells.map((c) => c.id))}><Icon path="M4 7h16v10H4z" size={14} /></button>
                     <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Guardar fila como bloque" aria-label="Guardar fila como bloque" onClick={() => {
                       const name = prompt('Nombre del bloque', row.cells.map((c) => byType[c.type]?.label).join(' + '));
                       if (name) saveBlock(name, row, [...new Set(row.cells.map((c) => c.source).filter(Boolean))]);
                     }}><Icon name="save" size={14} /></button>
-                    <button type="button" className="ui-icon-btn ui-icon-btn-s ui-danger" title="Eliminar fila" aria-label="Eliminar fila" onClick={() => { if (confirm('¿Eliminar la fila completa?')) commit(ops.removeRow(model, r)); }}><Icon name="delete" size={14} /></button>
+                    <button type="button" className="ui-icon-btn ui-icon-btn-s ui-danger" title="Eliminar fila" aria-label="Eliminar fila" onClick={() => { if (confirm('¿Eliminar la fila completa?')) commit(ops.removeRow(pm, r)); }}><Icon name="delete" size={14} /></button>
                   </div>
                   <div className="rpt-row dz-row" onDragOver={(e) => overRowEnd(e, r)} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDrop(null); }}
                     onDrop={(e) => { e.preventDefault(); applyDrop(drop && (drop.row === r || drop.newRow != null) ? drop : { row: r }); }}>
@@ -311,16 +355,16 @@ export default function Designer({ model, dataSources, params, onChange }) {
                             </span>
                             {isSel && primary === cell.id && (
                               <span className="dz-cell-actions">
-                                <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Mover a la izquierda" aria-label="Mover a la izquierda" onClick={() => commit(ops.nudgeCell(model, cell.id, 'left'))}><Icon name="left" size={14} /></button>
-                                <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Mover a la derecha" aria-label="Mover a la derecha" onClick={() => commit(ops.nudgeCell(model, cell.id, 'right'))}><Icon name="right" size={14} /></button>
-                                <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Mover a la fila superior" aria-label="Mover arriba" onClick={() => commit(ops.nudgeCell(model, cell.id, 'up'))}><Icon name="up" size={14} /></button>
-                                <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Mover a la fila inferior" aria-label="Mover abajo" onClick={() => commit(ops.nudgeCell(model, cell.id, 'down'))}><Icon name="down" size={14} /></button>
+                                <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Mover a la izquierda" aria-label="Mover a la izquierda" onClick={() => commit(ops.nudgeCell(pm, cell.id, 'left'))}><Icon name="left" size={14} /></button>
+                                <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Mover a la derecha" aria-label="Mover a la derecha" onClick={() => commit(ops.nudgeCell(pm, cell.id, 'right'))}><Icon name="right" size={14} /></button>
+                                <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Mover a la fila superior" aria-label="Mover arriba" onClick={() => commit(ops.nudgeCell(pm, cell.id, 'up'))}><Icon name="up" size={14} /></button>
+                                <button type="button" className="ui-icon-btn ui-icon-btn-s" title="Mover a la fila inferior" aria-label="Mover abajo" onClick={() => commit(ops.nudgeCell(pm, cell.id, 'down'))}><Icon name="down" size={14} /></button>
                                 <button type="button" className="ui-icon-btn ui-icon-btn-s dz-only-mobile" title="Propiedades" aria-label="Propiedades" onClick={() => setPane('props')}><Icon name="settings" size={14} /></button>
                                 <button type="button" className="ui-icon-btn ui-icon-btn-s ui-danger" title="Eliminar (Supr)" aria-label="Eliminar" onClick={(e) => { e.stopPropagation(); removeSel(); }}><Icon name="delete" size={14} /></button>
                               </span>
                             )}
                           </div>
-                          <LiveComponent type={cell.type} props={cell.props} source={src} palette={theme.palette} />
+                          <LiveComponent type={cell.type} props={cell.props} source={src} srcId={cell.source} semantic={semantic} palette={paletteArg} designer data={data} />
                           {isSel && <span className="dz-resize dz-resize-x" role="separator" aria-label="Arrastra para cambiar el ancho" onPointerDown={(e) => startResize(e, cell, 'x')} />}
                           {isSel && <span className="dz-resize dz-resize-y" role="separator" aria-label="Arrastra para cambiar el alto" onPointerDown={(e) => startResize(e, cell, 'y')} />}
                         </div>
@@ -329,7 +373,7 @@ export default function Designer({ model, dataSources, params, onChange }) {
                   </div>
                 </div>
               ))}
-              {model.rows.length > 0 && newRowZone(model.rows.length)}
+              {pm.rows.length > 0 && newRowZone(pm.rows.length)}
             </div>
           </div>
         </div>
@@ -340,17 +384,19 @@ export default function Designer({ model, dataSources, params, onChange }) {
           model={model}
           cells={selCells}
           dataSources={dataSources}
-          onModel={commit}
-          onCell={(patch) => commit(ops.updateCell(model, primary, patch))}
+          onModel={commitModel}
+          semantic={semantic}
+          reports={reports}
+          onCell={(patch) => commit(ops.updateCell(pm, primary, patch))}
           onCells={(patch, map) => {
-            if (!map) return commit(ops.updateCells(model, selection, patch));
-            let m = model;
+            if (!map) return commit(ops.updateCells(pm, selection, patch));
+            let m = pm;
             for (const c of selCells) m = ops.updateCell(m, c.id, map(c));
             commit(m);
           }}
           onRemove={removeSel}
           onDuplicate={duplicate}
-          onArrange={() => commit(ops.arrangeInRow(model, selection))}
+          onArrange={() => commit(ops.arrangeInRow(pm, selection))}
         />
         {issues.length > 0 && (
           <div className="ui-msg ui-msg-warn pp-issues">
